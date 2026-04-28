@@ -11,3 +11,6 @@ vaderSentiment==3.3.2
 
 # Scheduling / timezone
 pytz==2024.1
+
+# Excel logging
+openpyxl>=3.1.0

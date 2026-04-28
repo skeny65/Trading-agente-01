@@ -7,9 +7,10 @@ from research.market_data import Quote
 
 logger = logging.getLogger(__name__)
 
-# Pesos del score compuesto (deben sumar 1.0)
-_W_SENTIMENT = 0.30
-_W_TREND     = 0.30
+# Pesos del score compuesto — estrategia swing (deben sumar 1.0)
+# La tendencia pesa más porque en swing trading la dirección de precio es dominante
+_W_TREND     = 0.40
+_W_SENTIMENT = 0.20
 _W_MACRO     = 0.25
 _W_VIX       = 0.15
 
@@ -24,26 +25,29 @@ class ScoreBreakdown:
 
 
 def _score_sentiment(s: SentimentResult) -> float:
-    # compound va de -1 a +1 → normalizamos a 0–1
     return round((s.compound + 1) / 2, 3)
 
 
 def _score_trend(q: Quote) -> float:
-    # bullish=1.0, neutral=0.5, bearish=0.0
-    # + bonus por volume_ratio alto (momentum de volumen)
-    base = {"bullish": 1.0, "neutral": 0.5, "bearish": 0.0}[q.trend]
-    # volumen mayor al doble del promedio suma hasta 0.1 extra
+    # Usa trend_strength (cruces SMA20/SMA50) para mayor precisión en swing
+    strength_map = {
+        "strong_bullish": 1.0,
+        "bullish":        0.75,
+        "neutral":        0.50,
+        "bearish":        0.25,
+        "strong_bearish": 0.0,
+    }
+    base = strength_map.get(q.trend_strength, 0.50)
+    # Bonus de volumen: confirma el movimiento (hasta +0.1 extra)
     vol_bonus = min((q.volume_ratio - 1.0) * 0.1, 0.1) if q.volume_ratio > 1.0 else 0.0
     return round(min(base + vol_bonus, 1.0), 3)
 
 
 def _score_macro(ctx: MacroContext) -> float:
-    # Fear & Greed normalizado a 0–1
     return round(ctx.fear_greed_score / 100, 3)
 
 
 def _score_vix(ctx: MacroContext) -> float:
-    # VIX bajo → score alto (mercado calmado = favorable para operar)
     mapping = {"low": 1.0, "moderate": 0.65, "high": 0.30, "extreme": 0.0}
     return mapping.get(ctx.vix_regime, 0.5)
 
@@ -53,16 +57,16 @@ def calculate(
     sentiment: SentimentResult,
     macro: MacroContext,
 ) -> ScoreBreakdown:
-    s_sentiment = _score_sentiment(sentiment)
     s_trend     = _score_trend(quote)
+    s_sentiment = _score_sentiment(sentiment)
     s_macro     = _score_macro(macro)
     s_vix       = _score_vix(macro)
 
     total = (
-        s_sentiment * _W_SENTIMENT
-        + s_trend   * _W_TREND
-        + s_macro   * _W_MACRO
-        + s_vix     * _W_VIX
+        s_trend     * _W_TREND
+        + s_sentiment * _W_SENTIMENT
+        + s_macro     * _W_MACRO
+        + s_vix       * _W_VIX
     )
 
     breakdown = ScoreBreakdown(
@@ -75,7 +79,7 @@ def calculate(
 
     logger.info(
         f"Score [{quote.symbol}]: total={total:.3f} "
-        f"| sentiment={s_sentiment:.2f} trend={s_trend:.2f} "
-        f"macro={s_macro:.2f} vix={s_vix:.2f}"
+        f"| trend={s_trend:.2f}({quote.trend_strength}) "
+        f"sentiment={s_sentiment:.2f} macro={s_macro:.2f} vix={s_vix:.2f}"
     )
     return breakdown

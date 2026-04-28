@@ -12,20 +12,20 @@ logger = logging.getLogger(__name__)
 
 
 class Decision(str, Enum):
-    APPROVE  = "APPROVE"
-    REJECT   = "REJECT"
+    APPROVE   = "APPROVE"
+    REJECT    = "REJECT"
     NO_SIGNAL = "NO_SIGNAL"
 
 
 @dataclass
 class EvaluationResult:
-    decision: Decision
-    action: str          # "buy" | "sell" | "none"
+    decision:   Decision
+    action:     str           # "buy" | "close" | "none"
     confidence: float
-    size: float
-    reason: str
-    symbol: str
-    score: ScoreBreakdown
+    size:       float
+    reason:     str
+    symbol:     str
+    score:      ScoreBreakdown
 
 
 def evaluate(
@@ -35,6 +35,18 @@ def evaluate(
     macro: MacroContext,
     score: ScoreBreakdown,
 ) -> EvaluationResult:
+
+    # ── Regla 0: bloqueo por VIX extremo ────────────────────────────────────
+    if config.BLOCK_NEW_ON_EXTREME_VIX and macro.vix_regime == "extreme":
+        return EvaluationResult(
+            decision=Decision.NO_SIGNAL,
+            action="none",
+            confidence=score.total,
+            size=0.0,
+            reason=f"VIX extremo ({macro.vix:.1f}) — no se abren nuevas posiciones",
+            symbol=symbol,
+            score=score,
+        )
 
     # ── Regla 1: score mínimo ────────────────────────────────────────────────
     if score.total < config.MIN_CONFIDENCE:
@@ -48,35 +60,33 @@ def evaluate(
             score=score,
         )
 
-    # ── Regla 2: consenso de señales ────────────────────────────────────────
+    # ── Regla 2: consenso de señales (configurable, default 3/3) ────────────
     bullish_signals = sum([
         quote.trend == "bullish",
         sentiment.label == "positive",
         macro.macro_bias == "bullish",
     ])
-
     bearish_signals = sum([
         quote.trend == "bearish",
         sentiment.label == "negative",
         macro.macro_bias == "bearish",
     ])
 
-    # Necesitamos al menos 2 de 3 señales alineadas
-    if bullish_signals >= 2:
+    required = config.CONSENSUS_REQUIRED
+
+    if bullish_signals >= required:
         action = "buy"
         reason = (
-            f"Score {score.total:.3f} | {bullish_signals}/3 señales alcistas "
-            f"| trend={quote.trend} sentiment={sentiment.label} macro={macro.macro_bias}"
+            f"Score {score.total:.3f} | {bullish_signals}/3 senales alcistas "
+            f"| trend={quote.trend_strength} sentiment={sentiment.label} macro={macro.macro_bias}"
         )
     elif bearish_signals >= 2:
-        # Por ahora agente01 solo opera en largo (SPY/QQQ).
-        # Señal bajista = no operar (no hay short).
         return EvaluationResult(
             decision=Decision.NO_SIGNAL,
             action="none",
             confidence=score.total,
             size=0.0,
-            reason=f"Señal bajista ({bearish_signals}/3) — sin operación larga disponible",
+            reason=f"Senal bajista ({bearish_signals}/3) — sin operacion larga",
             symbol=symbol,
             score=score,
         )
@@ -86,23 +96,24 @@ def evaluate(
             action="none",
             confidence=score.total,
             size=0.0,
-            reason=f"Señales mixtas (bullish={bullish_signals} bearish={bearish_signals})",
+            reason=f"Consenso insuficiente ({bullish_signals}/{required} bullish requeridas)",
             symbol=symbol,
             score=score,
         )
 
-    # ── Tamaño dinámico según confianza ─────────────────────────────────────
-    # Score 0.65–0.75 → size 0.05
-    # Score 0.75–0.85 → size 0.10
-    # Score > 0.85    → size 0.15
+    # ── Tamaño dinámico (sizing conservador para swing) ──────────────────────
+    # score >= 0.85 → 8% | >= 0.78 → 5% | >= 0.70 → 3%
     if score.total >= 0.85:
-        size = 0.15
-    elif score.total >= 0.75:
-        size = 0.10
+        size = config.SIZE_HIGH_CONFIDENCE
+    elif score.total >= 0.78:
+        size = config.SIZE_MEDIUM_CONFIDENCE
     else:
-        size = 0.05
+        size = config.SIZE_LOW_CONFIDENCE
 
-    logger.info(f"APPROVE [{symbol}]: {action.upper()} | confidence={score.total:.3f} | size={size}")
+    logger.info(
+        f"APPROVE [{symbol}]: {action.upper()} | confidence={score.total:.3f} "
+        f"| size={size} | trend_strength={quote.trend_strength}"
+    )
 
     return EvaluationResult(
         decision=Decision.APPROVE,

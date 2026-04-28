@@ -17,7 +17,7 @@ Usa `.env.example` como plantilla.
 ### WEBHOOK_SECRET
 - **Descripción**: Secreto compartido entre agente01 y bot1 para autenticar webhooks
 - **Debe coincidir con**: el valor de `WEBHOOK_SECRET` en el `.env` de bot1 (Trading-bot)
-- **Ejemplo**: `WEBHOOK_SECRET=mi_secreto_super_largo_de_32_caracteres`
+- **Ejemplo**: `WEBHOOK_SECRET=a_secure_random_string`
 - **Efecto si falta**: `config.validate()` aborta el arranque con error
 - **Efecto si es incorrecto**: bot1 rechaza con HTTP 401
 
@@ -33,45 +33,140 @@ Usa `.env.example` como plantilla.
 
 ### WATCHLIST
 - **Descripción**: Símbolos que agente01 monitorea en cada ciclo, separados por coma
-- **Default**: `SPY,QQQ`
-- **Símbolos soportados**: Cualquier ticker válido de Yahoo Finance (acciones, ETFs, crypto como `BTC-USD`, `ETH-USD`)
-- **Ejemplo**: `WATCHLIST=SPY,QQQ,BTC-USD`
+- **Default**: `SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV`
+- **Símbolos soportados**: Cualquier ticker válido de Yahoo Finance (acciones, ETFs)
+- **Recomendación**: ETFs de índice de alta liquidez para swing trading
+- **Ejemplo**: `WATCHLIST=SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV`
 
-### CYCLE_INTERVAL_HOURS
-- **Descripción**: Cada cuántas horas se repite el ciclo de investigación
-- **Default**: `4`
-- **Rango recomendado**: 2–6 horas (menos es más costoso en API calls de NewsAPI)
-- **Ejemplo**: `CYCLE_INTERVAL_HOURS=4`
+### CYCLE_INTERVAL_MINUTES
+- **Descripción**: Cada cuántos minutos se repite el ciclo de investigación
+- **Default**: `60`
+- **Nota**: El agente analiza solo en horario de mercado. Fuera del horario, el ciclo se omite pero el scheduler sigue corriendo.
+- **Ejemplo**: `CYCLE_INTERVAL_MINUTES=60`
 
 ### MIN_CONFIDENCE
-- **Descripción**: Score mínimo que debe alcanzar un símbolo para generar señal de compra
-- **Default**: `0.65`
+- **Descripción**: Score mínimo que debe alcanzar un símbolo para pasar a la regla de consenso
+- **Default**: `0.70`
 - **Rango**: 0.0–1.0 (más alto = más restrictivo = menos señales)
-- **Recomendado**: 0.65–0.75 para equilibrio calidad/frecuencia
-- **Ejemplo**: `MIN_CONFIDENCE=0.65`
+- **Recomendado**: 0.70–0.80 para swing trading de calidad
+- **Ejemplo**: `MIN_CONFIDENCE=0.70`
+
+### CONSENSUS_REQUIRED
+- **Descripción**: Número de señales cualitativas bullish requeridas (de 3 posibles)
+- **Default**: `3`
+- **Nota**: Para swing trading se requiere 3/3 — tendencia, sentimiento y macro deben ser bullish simultáneamente
+- **Ejemplo**: `CONSENSUS_REQUIRED=3`
 
 ### COOLDOWN_HOURS
 - **Descripción**: Ventana de tiempo después de enviar una señal en la que no se repite el mismo símbolo
+- **Default**: `24`
+- **Propósito**: Un swing dura días — no se reabre una posición en horas
+- **Ejemplo**: `COOLDOWN_HOURS=24`
+
+### NEWS_LOOKBACK_HOURS
+- **Descripción**: Ventana de tiempo hacia atrás para buscar noticias en NewsAPI
 - **Default**: `4`
-- **Propósito**: Evitar señales duplicadas en ciclos consecutivos
-- **Ejemplo**: `COOLDOWN_HOURS=4`
+- **Relación con el ciclo**: 4h de noticias con ciclo de 1h → buena cobertura sin noticias obsoletas
+- **Ejemplo**: `NEWS_LOOKBACK_HOURS=4`
 
-### DEFAULT_STOP_LOSS
-- **Descripción**: Stop loss por defecto incluido en el payload a bot1 (fracción del precio)
-- **Default**: `0.02` (2%)
-- **Nota**: agente01 envía este valor como referencia; bot1 decide si lo usa según su propia lógica
-- **Ejemplo**: `DEFAULT_STOP_LOSS=0.02`
+### PRICE_HISTORY_DAYS
+- **Descripción**: Días de historial de precios a descargar de Yahoo Finance
+- **Default**: `60`
+- **Por qué 60**: Necesario para calcular SMA50 con datos suficientes (mínimo 50 días)
+- **Ejemplo**: `PRICE_HISTORY_DAYS=60`
 
-### DEFAULT_TAKE_PROFIT
-- **Descripción**: Take profit por defecto incluido en el payload a bot1 (fracción del precio)
-- **Default**: `0.04` (4%)
-- **Ratio riesgo/beneficio**: 1:2 con el stop loss por defecto
-- **Ejemplo**: `DEFAULT_TAKE_PROFIT=0.04`
+---
+
+## Variables de Trailing Stop Dinámico
+
+### EXIT_STRATEGY
+- **Descripción**: Estrategia de salida enviada a bot1
+- **Default**: `trailing_stop`
+- **Nota**: Actualmente solo se soporta `trailing_stop`
+- **Ejemplo**: `EXIT_STRATEGY=trailing_stop`
+
+### TRAIL_PERCENT_LOW_VIX
+- **Descripción**: Trailing stop para régimen VIX bajo (VIX < 15)
+- **Default**: `3.0` (3%)
+- **Justificación**: Mercado calmado — trailing ajustado para maximizar ganancias
+- **Ejemplo**: `TRAIL_PERCENT_LOW_VIX=3.0`
+
+### TRAIL_PERCENT_MODERATE_VIX
+- **Descripción**: Trailing stop para régimen VIX moderado (VIX 15–20)
+- **Default**: `4.0` (4%)
+- **Ejemplo**: `TRAIL_PERCENT_MODERATE_VIX=4.0`
+
+### TRAIL_PERCENT_HIGH_VIX
+- **Descripción**: Trailing stop para régimen VIX alto (VIX 20–30)
+- **Default**: `5.5` (5.5%)
+- **Justificación**: Alta volatilidad — el trade necesita más espacio para respirar
+- **Ejemplo**: `TRAIL_PERCENT_HIGH_VIX=5.5`
+
+### TAKE_PROFIT_HIGH_VIX
+- **Descripción**: Take profit fijo (%) para régimen VIX alto
+- **Default**: `8.0` (8%)
+- **Aplica**: Solo cuando `vix_regime == "high"`. En low/moderate se deja correr sin TP.
+- **Ejemplo**: `TAKE_PROFIT_HIGH_VIX=8.0`
+
+### BLOCK_NEW_ON_EXTREME_VIX
+- **Descripción**: Si `true`, bloquea la apertura de nuevas posiciones cuando VIX > 30
+- **Default**: `true`
+- **Ejemplo**: `BLOCK_NEW_ON_EXTREME_VIX=true`
+
+### MAX_HOLDING_DAYS_LOW
+- **Descripción**: Días máximos de holding para régimen VIX bajo
+- **Default**: `15`
+- **Ejemplo**: `MAX_HOLDING_DAYS_LOW=15`
+
+### MAX_HOLDING_DAYS_MODERATE
+- **Descripción**: Días máximos de holding para régimen VIX moderado
+- **Default**: `10`
+- **Ejemplo**: `MAX_HOLDING_DAYS_MODERATE=10`
+
+### MAX_HOLDING_DAYS_HIGH
+- **Descripción**: Días máximos de holding para régimen VIX alto
+- **Default**: `7`
+- **Ejemplo**: `MAX_HOLDING_DAYS_HIGH=7`
+
+---
+
+## Variables de Position Sizing
+
+### SIZE_HIGH_CONFIDENCE
+- **Descripción**: Tamaño de posición cuando score >= 0.85
+- **Default**: `0.08` (8% del capital)
+- **Ejemplo**: `SIZE_HIGH_CONFIDENCE=0.08`
+
+### SIZE_MEDIUM_CONFIDENCE
+- **Descripción**: Tamaño de posición cuando score >= 0.78
+- **Default**: `0.05` (5% del capital)
+- **Ejemplo**: `SIZE_MEDIUM_CONFIDENCE=0.05`
+
+### SIZE_LOW_CONFIDENCE
+- **Descripción**: Tamaño de posición cuando score >= 0.70 (mínimo para APPROVE)
+- **Default**: `0.03` (3% del capital)
+- **Ejemplo**: `SIZE_LOW_CONFIDENCE=0.03`
+
+### MAX_CONCURRENT_POSITIONS
+- **Descripción**: Número máximo de posiciones abiertas simultáneamente
+- **Default**: `12`
+- **Nota**: El agente usa `open_positions.json` para tracking, pero la limitación real la aplica bot1
+- **Ejemplo**: `MAX_CONCURRENT_POSITIONS=12`
+
+### MAX_TOTAL_EXPOSURE
+- **Descripción**: Exposición máxima total como fracción del capital (0.0–1.0)
+- **Default**: `0.80` (80%)
+- **Ejemplo**: `MAX_TOTAL_EXPOSURE=0.80`
+
+---
+
+## Modo de Operación
 
 ### DRY_RUN
-- **Descripción**: Modo de simulación. Si `true`, todo el ciclo corre normalmente pero el webhook no se envía a bot1
+- **Descripción**: Modo de simulación. Si `true`, todo el ciclo corre normalmente pero el webhook NO se envía a bot1
 - **Default**: `true`
 - **Valores**: `true` | `false`
+- **Nota**: En DRY_RUN=true, los logs JSON y el Excel se escriben normalmente — solo se omite el POST real a bot1. El `webhook_status` en Excel queda como `"dry_run"`.
 - **Recomendación**: Empezar siempre en `true`, cambiar a `false` solo cuando el ciclo esté verificado
 - **Ejemplo**: `DRY_RUN=true`
 
@@ -92,27 +187,61 @@ Usa `.env.example` como plantilla.
 
 ---
 
-## Resumen
+## .env completo de referencia
 
 ```bash
-# .env mínimo para arrancar
-NEWSAPI_KEY=tu_api_key
-WEBHOOK_SECRET=mismo_que_bot1
+# ── NewsAPI ───────────────────────────────────────────────
+NEWSAPI_KEY=tu_api_key_de_newsapi
 
-# .env completo recomendado
-NEWSAPI_KEY=tu_api_key
-WEBHOOK_SECRET=mismo_que_bot1
+# ── Webhook (bot1) ────────────────────────────────────────
+WEBHOOK_SECRET=mismo_secreto_que_bot1
 WEBHOOK_URL=http://127.0.0.1:8000/webhook/bot2
-WATCHLIST=SPY,QQQ
-CYCLE_INTERVAL_HOURS=4
-MIN_CONFIDENCE=0.65
-COOLDOWN_HOURS=4
-DEFAULT_STOP_LOSS=0.02
-DEFAULT_TAKE_PROFIT=0.04
+
+# ── Simbolos a monitorear ─────────────────────────────────
+WATCHLIST=SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV
+
+# ── Ciclo (en minutos) ────────────────────────────────────
+CYCLE_INTERVAL_MINUTES=60
+
+# ── Umbrales de decision ──────────────────────────────────
+MIN_CONFIDENCE=0.70
+CONSENSUS_REQUIRED=3
+COOLDOWN_HOURS=24
+
+# ── Ventanas de datos ─────────────────────────────────────
+NEWS_LOOKBACK_HOURS=4
+PRICE_HISTORY_DAYS=60
+
+# ── Trailing stop dinamico por regimen VIX ────────────────
+EXIT_STRATEGY=trailing_stop
+TRAIL_PERCENT_LOW_VIX=3.0
+TRAIL_PERCENT_MODERATE_VIX=4.0
+TRAIL_PERCENT_HIGH_VIX=5.5
+TAKE_PROFIT_HIGH_VIX=8.0
+BLOCK_NEW_ON_EXTREME_VIX=true
+
+MAX_HOLDING_DAYS_LOW=15
+MAX_HOLDING_DAYS_MODERATE=10
+MAX_HOLDING_DAYS_HIGH=7
+
+# ── Position sizing conservador ───────────────────────────
+SIZE_HIGH_CONFIDENCE=0.08
+SIZE_MEDIUM_CONFIDENCE=0.05
+SIZE_LOW_CONFIDENCE=0.03
+MAX_CONCURRENT_POSITIONS=12
+MAX_TOTAL_EXPOSURE=0.80
+
+# ── Modo de operacion ─────────────────────────────────────
+# true  -> solo loguea, NO envia webhook real a bot1
+# false -> envia webhook real
 DRY_RUN=true
-TELEGRAM_BOT_TOKEN=         # opcional
-TELEGRAM_CHAT_ID=           # opcional
+
+# ── Telegram (opcional) ───────────────────────────────────
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 ```
+
+---
 
 ## Buenas Prácticas de Seguridad
 

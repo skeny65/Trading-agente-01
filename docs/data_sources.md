@@ -9,48 +9,50 @@ Este documento detalla exactamente de dónde viene cada dato, qué se extrae, y 
 ## Mapa de fuentes → decisión
 
 ```
- FUENTE EXTERNA                DATO EXTRAÍDO            CONTRIBUCIÓN AL SCORE
- ─────────────────────────────────────────────────────────────────────────────
+ FUENTE EXTERNA                DATO EXTRAÍDO              CONTRIBUCIÓN AL SCORE
+ ──────────────────────────────────────────────────────────────────────────────
 
- Yahoo Finance (precio)   →   precio, SMA20, volumen  →  trend_score   (30%)
- ─────────────────────────────────────────────────────────────────────────────
- NewsAPI.org (titulares)  →   headlines últimas 6h     →
-                                   │                        sentiment_score (30%)
- VADER NLP (local)        ←────────┘  analiza texto    →
- ─────────────────────────────────────────────────────────────────────────────
- CNN Fear & Greed         →   índice de sentimiento    →  macro_score   (25%)
-                              del mercado (0–100)
- ─────────────────────────────────────────────────────────────────────────────
- Yahoo Finance (^VIX)     →   volatilidad implícita    →  news_score    (15%)
-                              del mercado
- ─────────────────────────────────────────────────────────────────────────────
-                                                             TOTAL SCORE (0–1)
-                                                                   │
-                                                         ¿≥ MIN_CONFIDENCE?
-                                                         ¿≥ 2/3 señales alineadas?
-                                                                   │
-                                                              APPROVE / NO_SIGNAL
-                                                                   │
-                                               POST http://127.0.0.1:8000/webhook/bot2
+ Yahoo Finance (precio)   →   precio, SMA20, SMA50,    →  trend_score   (40%)
+                               volumen, trend_strength
+ ──────────────────────────────────────────────────────────────────────────────
+ NewsAPI.org (titulares)  →   headlines ultimas 4h      →
+                                   │                        sentiment_score (20%)
+ VADER NLP (local)        <────────┘  analiza texto     →
+ ──────────────────────────────────────────────────────────────────────────────
+ CNN Fear & Greed         →   indice de sentimiento     →  macro_score   (25%)
+                               del mercado (0–100)
+ ──────────────────────────────────────────────────────────────────────────────
+ Yahoo Finance (^VIX)     →   volatilidad implicita     →  vix_score     (15%)
+                               del mercado
+ ──────────────────────────────────────────────────────────────────────────────
+                                                              TOTAL SCORE (0–1)
+                                                                    │
+                                                          >= MIN_CONFIDENCE (0.70)?
+                                                          >= 3/3 señales alineadas?
+                                                          VIX != "extreme"?
+                                                                    │
+                                                             APPROVE / NO_SIGNAL
+                                                                    │
+                                                POST http://127.0.0.1:8000/webhook/bot2
 ```
 
 ---
 
-## Fuente 1 — Yahoo Finance: Precio y Tendencia
+## Fuente 1 — Yahoo Finance: Precio, SMA20, SMA50 y Tendencia
 
 **Módulo:** `research/market_data.py`
 **Librería:** `yfinance`
 **API Key:** No requerida
 **Coste:** Gratuito
-**Límite:** Sin límite oficial, pero sujeto a rate limiting (pausas breves entre llamadas)
+**Limite:** Sin limite oficial, sujeto a rate limiting (pausas breves entre llamadas)
 
 ### Qué se descarga
 
-Para cada símbolo del `WATCHLIST`, se descarga el historial de los **últimos 30 días** de precios de cierre y volumen.
+Para cada símbolo del `WATCHLIST`, se descarga el historial de los **últimos 60 días** de precios de cierre y volumen.
 
 ```
-Ticker("SPY").history(period="30d")
-→ DataFrame con columnas: Close, Volume (30 filas)
+Ticker("SPY").history(period="60d")
+→ DataFrame con columnas: Close, Volume (60 filas)
 ```
 
 ### Qué se calcula
@@ -61,14 +63,27 @@ Ticker("SPY").history(period="30d")
 | `prev_close` | Penúltimo cierre | Precio del día anterior |
 | `change_pct` | `(price - prev_close) / prev_close × 100` | % de cambio diario |
 | `volume` | Volumen del último día | Actividad del día |
-| `avg_volume` | Media de volumen de los 30 días | Volumen normal |
+| `avg_volume` | Media de volumen de los 60 días | Volumen normal |
 | `volume_ratio` | `volume / avg_volume` | Anomalía de volumen (>1 = más activo de lo normal) |
 | `sma20` | Media simple de los últimos 20 cierres | Tendencia de medio plazo |
+| `sma50` | Media simple de los últimos 50 cierres | Tendencia de largo plazo |
 | `price_vs_sma20` | `(price - sma20) / sma20 × 100` | % por encima/debajo de la media |
-| `trend` | Ver lógica abajo | Dirección de la tendencia |
+| `trend` | "bullish" / "neutral" / "bearish" | Clasificación simple |
+| `trend_strength` | Ver tabla abajo | Clasificación detallada (5 niveles) |
 
-### Lógica de clasificación de tendencia
+### Lógica de trend_strength (usa SMA20 y SMA50)
 
+La estrategia swing usa `trend_strength` — una clasificación de 5 niveles que considera la alineación entre precio, SMA20 y SMA50:
+
+| trend_strength | Condición | Score base |
+|---|---|---|
+| `strong_bullish` | precio > SMA20 > SMA50 | 1.00 |
+| `bullish` | precio > SMA20, SMA20 aprox. SMA50 | 0.75 |
+| `neutral` | precio aprox. SMA20 | 0.50 |
+| `bearish` | precio < SMA20 | 0.25 |
+| `strong_bearish` | precio < SMA20 < SMA50 | 0.00 |
+
+La `trend` simple se deriva de `price_vs_sma20`:
 ```
 price_vs_sma20 > +1%  →  trend = "bullish"
 price_vs_sma20 < -1%  →  trend = "bearish"
@@ -78,20 +93,20 @@ entre -1% y +1%       →  trend = "neutral"
 ### Cómo contribuye al score
 
 ```
-trend_score (peso 30%):
-  "bullish" → 1.0
-  "neutral" → 0.5
-  "bearish" → 0.0
-  + vol_bonus: si volume_ratio > 1.0 → se suma hasta +0.10
-               (cuanto más volumen anómalo, más convicción en la tendencia)
+trend_score (peso 40%):
+  base = strength_map[trend_strength]   # 0.0 – 1.0
+  vol_bonus = min((volume_ratio - 1.0) × 0.1, 0.10) si volume_ratio > 1.0
+  trend_score = min(base + vol_bonus, 1.0)
 ```
 
 **Ejemplo real:**
 ```
-SPY: $715.17 | SMA20: $685.04 | price_vs_sma20: +4.40%
-→ trend = "bullish"
-→ trend_score = 1.0 + vol_bonus(0.0) = 1.0
-→ contribución al score: 1.0 × 30% = 0.300
+SPY: $590.00 | SMA20=$572.00 | SMA50=$555.00
+precio > SMA20 > SMA50  →  trend_strength = "strong_bullish"
+→ trend_score = 1.0
+volume_ratio = 1.2x  →  vol_bonus = 0.02
+→ trend_score final = 1.0 (ya en máximo)
+→ contribución al score: 1.0 × 40% = 0.400
 ```
 
 ---
@@ -102,11 +117,11 @@ SPY: $715.17 | SMA20: $685.04 | price_vs_sma20: +4.40%
 **Endpoint:** `https://newsapi.org/v2/everything`
 **API Key:** **Requerida** (variable `NEWSAPI_KEY`)
 **Coste:** Gratuito (100 requests/día en plan free)
-**Consumo real:** ~2 requests/ciclo (uno por símbolo). Con 2 símbolos y ciclos de 4h = ~12 requests/día.
+**Consumo real:** ~8 requests/ciclo (uno por símbolo). Con 8 símbolos y ciclos de 1h = hasta 64 requests/hora durante mercado (6.5h) = hasta 416/día. Si alcanza el límite, la lista queda vacía y el sentimiento es neutral.
 
 ### Qué se consulta
 
-Por cada símbolo, se buscan artículos publicados en las **últimas 6 horas** (configurable con el parámetro `hours`):
+Por cada símbolo, se buscan artículos publicados en las **últimas 4 horas** (alineado al ciclo de 1h):
 
 ```
 GET /v2/everything
@@ -127,11 +142,11 @@ Por cada artículo devuelto:
 | `source` | `article["source"]["name"]` | "Reuters" |
 | `published_at` | `article["publishedAt"]` | "2026-04-27T13:45:00Z" |
 
-Solo se incluyen artículos cuyo `published_at` está dentro de la ventana de tiempo. La lista puede estar vacía si no hay noticias recientes (común fuera del horario de mercado).
+Solo se incluyen artículos cuyo `published_at` está dentro de la ventana de 4 horas. La lista puede estar vacía si no hay noticias recientes (el ciclo continúa con sentimiento neutral).
 
-### Qué pasa con los titulares (paso siguiente: VADER)
+### Qué pasa con los titulares
 
-Los titulares por sí solos no valen como número. El siguiente paso (fuente 3) los convierte en una señal cuantitativa.
+Los titulares por sí solos no valen como número. El siguiente paso (Fuente 3) los convierte en una señal cuantitativa.
 
 ---
 
@@ -157,25 +172,25 @@ Para cada titular de NewsAPI, VADER evalúa:
 ```python
 analyze(headlines) → SentimentResult:
   compound        = promedio de scores compound de todos los titulares
-  positive_ratio  = % de titulares con compound ≥ +0.05
-  negative_ratio  = % de titulares con compound ≤ -0.05
+  positive_ratio  = % de titulares con compound >= +0.05
+  negative_ratio  = % de titulares con compound <= -0.05
   headline_count  = total de titulares analizados
   label           = "positive" | "neutral" | "negative"
 ```
 
 **Clasificación del label:**
 ```
-compound ≥ +0.05  →  "positive"
-compound ≤ -0.05  →  "negative"
+compound >= +0.05  →  "positive"
+compound <= -0.05  →  "negative"
 entre -0.05/+0.05 →  "neutral"
 ```
 
-**Con 0 titulares:** retorna compound=0.0, label="neutral". No genera error — el ciclo continúa con sentimiento neutral.
+**Con 0 titulares:** retorna compound=0.0, label="neutral". No genera error.
 
 ### Cómo contribuye al score
 
 ```
-sentiment_score (peso 30%):
+sentiment_score (peso 20%):
   normalización: (compound + 1) / 2  →  convierte rango [-1,+1] a [0,1]
 
   compound = +0.80  →  sentiment_score = 0.90  (muy positivo)
@@ -189,8 +204,15 @@ sentiment_score (peso 30%):
 8 titulares: "Fed signals pause", "SPY breaks resistance", "Markets rally on earnings"
 → compound promedio = +0.68
 → sentiment_score = (0.68 + 1) / 2 = 0.84
-→ contribución al score: 0.84 × 30% = 0.252
+→ contribución al score: 0.84 × 20% = 0.168
 ```
+
+### Importancia en la decisión de consenso
+
+Además del score numérico, el `label` de sentimiento participa en la **regla de consenso 3/3**:
+- `label == "positive"` cuenta como señal bullish
+- `label == "negative"` cuenta como señal bearish
+- `label == "neutral"` no suma ni resta al consenso
 
 ---
 
@@ -234,12 +256,15 @@ macro_score (peso 25%):
 
 ### También determina el macro_bias
 
-El `macro_bias` es una señal cualitativa que el motor de decisión usa para el consenso 2/3:
+El `macro_bias` es una señal cualitativa que el motor de decisión usa para el consenso 3/3:
 
 ```
-macro_bias = "bullish"  si fear_greed ≥ 60 O vix < 20
-macro_bias = "bearish"  si fear_greed ≤ 40 O vix > 25
-macro_bias = "neutral"  en el resto de los casos
+Puntos bullish:   +1 si fear_greed >= 60  |  +1 si vix < 20
+Puntos bearish:   +1 si fear_greed <= 40  |  +1 si vix > 25
+
+macro_bias = "bullish" si puntos_bullish > puntos_bearish
+macro_bias = "bearish" si puntos_bearish > puntos_bullish
+macro_bias = "neutral" si empate
 ```
 
 ---
@@ -254,29 +279,40 @@ macro_bias = "neutral"  en el resto de los casos
 
 ### Qué mide
 
-El VIX mide la **volatilidad implícita** del S&P 500 para los próximos 30 días, derivada de los precios de opciones. Es conocido como el "índice del miedo" del mercado:
+El VIX mide la **volatilidad implícita** del S&P 500 para los próximos 30 días. Es el "índice del miedo" del mercado.
 
-| Régimen | VIX | Interpretación |
-|---|---|---|
-| `low` | < 15 | Calma total, baja volatilidad → favorable para trading |
-| `moderate` | 15–20 | Normalidad → condiciones aceptables |
-| `high` | 20–30 | Volatilidad elevada → precaución |
-| `extreme` | > 30 | Crisis / pánico → señal muy desfavorable |
+### Régimen VIX — el parámetro más importante de la estrategia
+
+El VIX no solo contribuye al score numérico: **determina el trailing stop y el tiempo máximo de la posición**:
+
+| Régimen | VIX | trail_percent | take_profit | max_holding_days |
+|---|---|---|---|---|
+| `low` | < 15 | **3.0%** | null (sin TP, dejar correr) | 15 días |
+| `moderate` | 15–20 | **4.0%** | null | 10 días |
+| `high` | 20–30 | **5.5%** | **8.0%** (defensivo) | 7 días |
+| `extreme` | > 30 | — | — | **No abrir** |
+
+**Razón:** un trailing del 3% con VIX en 25 te saca con cualquier vela normal. La volatilidad dicta el espacio que necesita el trade para respirar.
 
 ### Cómo contribuye al score
 
 ```
-news_score (peso 15%):
-  "low"     (VIX < 15)   →  1.00  (entorno ideal)
-  "moderate"(VIX 15–20)  →  0.65  (aceptable)
-  "high"    (VIX 20–30)  →  0.30  (desfavorable)
-  "extreme" (VIX > 30)   →  0.00  (no operar)
+vix_score (peso 15%):
+  "low"      (VIX < 15)   →  1.00  (entorno ideal)
+  "moderate" (VIX 15–20)  →  0.65  (aceptable)
+  "high"     (VIX 20–30)  →  0.30  (desfavorable)
+  "extreme"  (VIX > 30)   →  0.00  (no operar)
 ```
+
+### Bloqueo por VIX extremo
+
+Si `vix_regime == "extreme"`, **no se abren nuevas posiciones independientemente del score**. Es la Regla 0 del motor de decisión.
 
 **Ejemplo real:**
 ```
-VIX = 18.02  →  régimen "moderate"  →  news_score = 0.65
+VIX = 18.02  →  régimen "moderate"  →  vix_score = 0.65
 → contribución al score: 0.65 × 15% = 0.098
+→ trail_percent para la posición = 4.0%
 ```
 
 ---
@@ -286,85 +322,99 @@ VIX = 18.02  →  régimen "moderate"  →  news_score = 0.65
 ### Paso 1 — Score numérico compuesto
 
 ```
-TOTAL = (sentiment_score × 0.30)
-      + (trend_score     × 0.30)
-      + (macro_score     × 0.25)
-      + (news_score      × 0.15)
+TOTAL = (trend_score     × 40%)
+      + (sentiment_score × 20%)
+      + (macro_score     × 25%)
+      + (vix_score       × 15%)
 
 Rango: 0.0 (todo negativo) → 1.0 (todo perfecto)
 ```
 
-### Paso 2 — Umbral mínimo
+### Paso 2 — Bloqueo por VIX extremo (Regla 0)
 
 ```
-TOTAL < MIN_CONFIDENCE (default: 0.65)  →  NO_SIGNAL inmediato
+vix_regime == "extreme"  →  NO_SIGNAL inmediato (sin analizar el score)
 ```
 
-### Paso 3 — Consenso de señales (regla 2/3)
-
-Aunque el score supere el umbral, se requiere que **al menos 2 de 3 señales cualitativas** apunten en la misma dirección:
+### Paso 3 — Umbral mínimo (Regla 1)
 
 ```
-Señal 1: trend      → "bullish" | "neutral" | "bearish"
-Señal 2: sentiment  → "positive"(bullish) | "neutral" | "negative"(bearish)
-Señal 3: macro_bias → "bullish" | "neutral" | "bearish"
-
-≥ 2 bullish  →  APPROVE BUY
-≥ 2 bearish  →  NO_SIGNAL (no se hacen operaciones cortas)
-mixto        →  NO_SIGNAL
+TOTAL < MIN_CONFIDENCE (0.70)  →  NO_SIGNAL inmediato
 ```
 
-### Paso 4 — Tamaño de posición por confianza
+### Paso 4 — Consenso de señales 3/3 (Regla 2)
+
+Se requiere que **las 3 señales cualitativas** apunten a bullish:
 
 ```
-TOTAL ≥ 0.85  →  size = 0.15  (15% del portafolio)
-TOTAL ≥ 0.75  →  size = 0.10  (10%)
-TOTAL ≥ 0.65  →  size = 0.05  (5%)
+Señal 1: trend_strength  → "bullish" o "strong_bullish"  (quote.trend == "bullish")
+Señal 2: sentiment       → "positive"
+Señal 3: macro_bias      → "bullish"
+
+3/3 bullish  →  APPROVE BUY
+Cualquier fallo → NO_SIGNAL
 ```
+
+### Paso 5 — Tamaño de posición por confianza
+
+```
+TOTAL >= 0.85  →  size = 8%  (SIZE_HIGH_CONFIDENCE)
+TOTAL >= 0.78  →  size = 5%  (SIZE_MEDIUM_CONFIDENCE)
+TOTAL >= 0.70  →  size = 3%  (SIZE_LOW_CONFIDENCE)
+```
+
+### Paso 6 — Trailing stop dinámico
+
+El `trail_percent` se determina por el régimen VIX **al momento de apertura** (no cambia durante la vida de la posición).
 
 ---
 
 ## Ejemplo completo de una decisión APPROVE
 
 ```
-Fecha: 2026-04-27 | Símbolo: SPY
+Fecha: 2026-04-27 | Símbolo: SPY | VIX = 16.5 (moderate)
 
-FUENTE 1 — Yahoo Finance (precio)
-  precio:        $715.17
-  SMA20:         $685.04
-  price_vs_sma20: +4.40%  →  trend = "bullish"
-  volume_ratio:   0.42x   →  vol_bonus = 0
-  → trend_score = 1.0
+FUENTE 1 — Yahoo Finance (precio, 60 días de historia)
+  precio:        $590.00
+  SMA20:         $572.00
+  SMA50:         $555.00
+  price > SMA20 > SMA50  →  trend_strength = "strong_bullish"
+  volume_ratio:  1.1x    →  vol_bonus = 0.01
+  → trend_score = min(1.0 + 0.01, 1.0) = 1.0
 
-FUENTE 2+3 — NewsAPI + VADER
-  titulares:     0 en últimas 6h (fuera de horario)
-  compound:      0.0  →  label = "neutral"
-  → sentiment_score = (0.0 + 1) / 2 = 0.50
+FUENTE 2+3 — NewsAPI + VADER (ultimas 4h)
+  titulares:     6 articulos
+  compound:      +0.52  →  label = "positive"
+  → sentiment_score = (0.52 + 1) / 2 = 0.76
 
 FUENTE 4 — CNN Fear & Greed
-  score:         50.0  →  label = "Neutral" (fallback)
-  macro_bias:    "bullish"  (VIX < 20 → condición bullish)
-  → macro_score = 50 / 100 = 0.50
+  score:         65  →  label = "Greed"
+  macro_bias:    "bullish"  (F&G >= 60 → +1 bullish, VIX<20 → +1 bullish)
+  → macro_score = 65 / 100 = 0.65
 
 FUENTE 5 — VIX
-  VIX:           18.02  →  régimen "moderate"
-  → news_score = 0.65
+  VIX: 16.5  →  régimen "moderate"
+  → vix_score = 0.65
+  → trail_percent para esta posición = 4.0%
 
 SCORE TOTAL:
-  (0.50 × 0.30) + (1.0 × 0.30) + (0.50 × 0.25) + (0.65 × 0.15)
-= 0.150 + 0.300 + 0.125 + 0.098
-= 0.672
+  (1.0 × 40%) + (0.76 × 20%) + (0.65 × 25%) + (0.65 × 15%)
+= 0.400 + 0.152 + 0.163 + 0.098
+= 0.813
 
-UMBRAL: 0.672 ≥ 0.65 ✓
-
+REGLA 0: VIX != extreme ✓
+UMBRAL:  0.813 >= 0.70 ✓
 CONSENSO:
-  trend="bullish" ✓  sentiment="neutral" ✗  macro="bullish" ✓
-  → 2/3 bullish → APPROVE BUY
+  trend=strong_bullish → "bullish" ✓
+  sentiment=positive ✓
+  macro=bullish ✓
+  → 3/3 → APPROVE BUY
 
-TAMAÑO: 0.672 ≥ 0.65 → size = 0.05
+TAMAÑO: 0.813 >= 0.78 → size = 5%
+TRAILING: moderate → trail_percent = 4.0%
 
 RESULTADO ENVIADO A BOT1:
-  action="buy" | confidence=0.672 | size=0.05
+  action="buy" | confidence=0.813 | size=0.05 | trail_percent=4.0
 ```
 
 ---

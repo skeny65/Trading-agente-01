@@ -19,7 +19,10 @@ class Headline:
     published_at: str
 
 
-def fetch(symbol: str, hours: int = 6) -> list[Headline]:
+def fetch(symbol: str, hours: int | None = None) -> list[Headline]:
+    if hours is None:
+        hours = config.NEWS_LOOKBACK_HOURS
+
     if not config.NEWSAPI_KEY:
         logger.warning("NEWSAPI_KEY no configurado — sin noticias")
         return []
@@ -28,18 +31,18 @@ def fetch(symbol: str, hours: int = 6) -> list[Headline]:
         r = requests.get(
             _BASE_URL,
             params={
-                "q": symbol,
+                "q":        symbol,
                 "language": "en",
-                "sortBy": "publishedAt",
+                "sortBy":   "publishedAt",
                 "pageSize": 20,
-                "apiKey": config.NEWSAPI_KEY,
+                "apiKey":   config.NEWSAPI_KEY,
             },
             timeout=10,
         )
         r.raise_for_status()
         articles = r.json().get("articles", [])
 
-        cutoff = datetime.now(timezone.utc).timestamp() - hours * 3600
+        cutoff  = datetime.now(timezone.utc).timestamp() - hours * 3600
         results: list[Headline] = []
 
         for a in articles:
@@ -60,13 +63,9 @@ def fetch(symbol: str, hours: int = 6) -> list[Headline]:
                 )
             )
 
-        logger.info(f"{symbol}: {len(results)} titulares en las últimas {hours}h")
+        logger.info(f"{symbol}: {len(results)} titulares en las ultimas {hours}h")
         return results
 
     except Exception as e:
         logger.error(f"NewsAPI error para {symbol}: {e}")
         return []
-
-
-def fetch_all(symbols: list[str], hours: int = 6) -> dict[str, list[Headline]]:
-    return {symbol: fetch(symbol, hours) for symbol in symbols}
