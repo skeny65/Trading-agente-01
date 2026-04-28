@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__tradingview__pine_list_scripts",
+      "mcp__tradingview__data_get_pine_tables",
+      "mcp__tradingview__capture_screenshot",
+      "mcp__tradingview__chart_get_state",
+      "mcp__tradingview__tv_health_check",
+      "mcp__tradingview__pine_get_source",
+      "mcp__binance__BinanceWalletUserAsset",
+      "mcp__binance__BinanceWalletQueryUserWalletBalance"
+    ]
+  }
+}
