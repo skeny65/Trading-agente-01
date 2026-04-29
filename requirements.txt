@@ -6,6 +6,12 @@ apscheduler==3.10.4
 # Market data
 yfinance==0.2.54
 
+# Technical analysis indicators (RSI, MACD, BB, ATR, SMA, EMA)
+ta>=0.11.0
+
+# Earnings calendar + extended Yahoo Finance data
+yahooquery>=2.3.7
+
 # Sentiment analysis
 vaderSentiment==3.3.2
 
