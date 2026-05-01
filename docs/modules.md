@@ -339,6 +339,153 @@ Si `should_close == True` → agente01 envía `build_close_payload` a bot1 con `
 
 ---
 
+## analysis/spy_cycle.py — Orquestador SPY Specialist
+
+Ejecuta el ciclo completo de investigación SPY: llama a los 6 módulos de dimensión, aplica el pipeline de filtros en cascada y llama a Claude para la decisión final.
+
+**Función principal:** `run(symbol="SPY") → SpyCycleResult`
+
+Nunca lanza excepción. Si una dimensión falla, usa valores neutros (0.5) y continúa.
+
+**`SpyCycleResult`:**
+```
+decision         str    "APPROVE" | "NO_SIGNAL"
+action           str    "buy" | "none"
+confidence       float  score total ponderado (0.0–1.0)
+size             float  fracción de capital (0.08/0.12/0.18/0.25)
+trail_percent    float  trailing stop % ajustado al régimen VIX
+reason           str    razón del filtro cascada
+claude_reasoning str    análisis narrativo de Claude
+symbol           str    símbolo analizado
+vix_regime       str    "low" | "moderate" | "high" | "extreme"
+vix_value        float  valor VIX spot
+filter_result    FilterResult  resultado completo del pipeline de filtros
+dimension_scores DimensionScores  scores de las 6 dimensiones
+```
+
+---
+
+## analysis/claude_analyst.py — Motor de Decisión Claude
+
+Llama a Claude API (via Anthropic SDK) con los datos estructurados del ciclo SPY.
+El system prompt estable se cachea (`cache_control: ephemeral`) para reducir costos.
+
+**Función principal:** `analyze(filter_result, market_snapshot) → ClaudeAnalysis`
+
+- Modelo: `CLAUDE_MODEL` del .env (default: `claude-haiku-4-5-20251001`)
+- Salida: JSON estructurado `{decision, action, confidence, size, trail_percent, reasoning}`
+- Fallback: `NO_SIGNAL` con `confidence=0.0` en caso de cualquier error de API
+
+**`ClaudeAnalysis`:**
+```
+decision       str    "APPROVE" | "NO_SIGNAL"
+action         str    "buy" | "none"
+confidence     float  confianza del modelo (0.0–1.0)
+size           float  tamaño sugerido
+trail_percent  float  trailing stop sugerido
+reasoning      str    explicación en 2–3 oraciones
+```
+
+**Costo estimado (Haiku 4.5):** ~$0.0002/ciclo con prompt caching activo.
+
+---
+
+## analysis/filters.py — Pipeline de Filtros en Cascada
+
+Aplica 4 pasos secuenciales antes de aprobar una señal SPY.
+
+| Paso | Mecanismo | Resultado |
+|---|---|---|
+| 1 | Vetos duros | NO_SIGNAL inmediato si VIX>30, FOMC<24h, earnings≥3, RSI>75, precio<SMA200, curva muy invertida |
+| 2 | Score compuesto | Suma ponderada de las 6 dimensiones (0.0–1.0) |
+| 3 | Filtros suaves | Multiplica score por evento moderado (×0.85) y ajusta trail |
+| 4 | Validación final | `score ≥ MIN_CONFIDENCE(0.72)` AND `≥5/6 dimensiones > 0.55` |
+
+**Función principal:** `evaluate(scores, vix_regime, ...) → FilterResult`
+
+---
+
+## analysis/dimension_scorers/ — Scorers por Dimensión
+
+Seis módulos, uno por dimensión. Todos producen un `total` normalizado 0.0–1.0.
+
+| Módulo | Entradas clave | Lógica |
+|--------|---------------|--------|
+| `macro_scorer.py` | inflation, employment, rates, fed_score, yield_curve_spread | Veto si spread<-0.50 Y total<0.35 |
+| `technical_scorer.py` | overall_score, bullish_count, rsi_veto, sma200_veto, atr_veto | Vetos fuerzan total=0; bonus alineación TFs |
+| `components_scorer.py` | top10_score, sector_score, earnings_veto | earnings_veto fuerza total=0 |
+| `sentiment_scorer.py` | fear_greed (0-1), vix_term, put_call, vader | Pesos: F&G 30%, VIX term 25%, P/C 20%, VADER 25% |
+| `events_scorer.py` | score_multiplier, veto, geopolitics_score | Veto FOMC/extreme → total=0 |
+| `cross_asset_scorer.py` | cross_asset_score, divergences | -0.10 por cada divergencia detectada |
+
+---
+
+## research/macro/ — Dimensión Macro (25%)
+
+| Módulo | Fuente | Datos |
+|--------|--------|-------|
+| `fred_client.py` | FRED API (FRED_API_KEY) | Client genérico con cache 4h en `state/fred_cache/` |
+| `inflation.py` | CPIAUCSL, PCEPILFE | CPI YoY, Core PCE, score 0-1 |
+| `employment.py` | UNRATE, IC4WSA, PAYEMS | Desempleo, jobless claims, nóminas |
+| `rates.py` | DFF, DGS10, DGS2, T10Y2Y | Fed Funds Rate, yield curve spread (10Y-2Y) |
+| `fed_watch.py` | CME FedWatch / inferencia | Probabilidades hike/cut/hold, fed_stance |
+
+---
+
+## research/technical/ — Dimensión Técnico (20%)
+
+| Módulo | Descripción |
+|--------|-------------|
+| `indicators.py` | SMA9/20/50/200, EMA9, RSI14, MACD, Bollinger Bands, ATR14, vol_ratio |
+| `key_levels.py` | Máximos/mínimos de 20d/50d/52w, distancia al máximo de 52 semanas |
+| `multi_timeframe.py` | Descarga 1D/4H/1H de yfinance, score por TF, alineación, vetos RSI/SMA200/ATR |
+
+**Vetos técnicos duros:**
+- `rsi_veto`: RSI diario > 75 (sobrecompra extrema)
+- `sma200_veto`: precio < SMA200 diaria (régimen bajista)
+- `atr_veto`: ATR > 2x media 30d (volatilidad anómala, penaliza -0.15)
+
+---
+
+## research/components/ — Dimensión Componentes (20%)
+
+| Módulo | Descripción |
+|--------|-------------|
+| `top_holdings.py` | SPY top-10 con pesos estáticos. Score = promedio ponderado del % 1d de cada holding |
+| `sectors.py` | 11 ETFs sectoriales SPDR. Score por breadth (# sectores en verde) |
+| `earnings_calendar.py` | yfinance.ticker.calendar para top-10. Veto si ≥3 reportan en 48h |
+
+---
+
+## research/events/ — Dimensión Eventos (10%)
+
+| Módulo | Descripción |
+|--------|-------------|
+| `fomc_calendar.py` | Parsea fed.gov para fechas FOMC. Cache 24h en `state/upcoming_events.json` |
+| `economic_calendar.py` | Scraping Trading Economics. Evento EXTREME <12h → veto. HIGH <24h → ×0.85 |
+| `geopolitics_news.py` | Reuters RSS + NewsAPI. Clasifica riesgo geopolítico en bajo/medio/alto |
+
+---
+
+## research/sentiment/ — Dimensión Sentimiento (15%)
+
+| Módulo | Descripción |
+|--------|-------------|
+| `vix_term_structure.py` | Descarga ^VIX9D, ^VIX, ^VIX3M. Contango=0.85, flat=0.55, backwardation=0.20 |
+| `put_call_ratio.py` | Scraping CBOE. Ratio>1.20 → contrarian bullish (score 0.75). Ratio<0.70 → bearish |
+
+---
+
+## research/cross_assets/ — Dimensión Cross-Assets (10%)
+
+| Módulo | Descripción |
+|--------|-------------|
+| `correlations.py` | Descarga DXY, TLT, GLD, USO, BTC-USD, HYG, QQQ. Detecta divergencias SPY vs activos |
+
+**Divergencias detectadas:** SPY+DXY (presión multinacionales), SPY+HYG- (institucionales reducen riesgo), SPY-+TLT+ (flight to safety).
+
+---
+
 ## sender/signal_formatter.py
 
 Construye los payloads JSON exactos que espera el endpoint `/webhook/bot2` de bot1.
@@ -348,7 +495,8 @@ Construye los payloads JSON exactos que espera el endpoint `/webhook/bot2` de bo
 | Función | Descripción |
 |---------|-------------|
 | `get_trail_config(vix_regime)` | Retorna `{trail_percent, take_profit_pct, max_holding_days}` segun VIX |
-| `build_payload(result, vix_regime)` | Payload de apertura (APPROVE BUY) con trailing dinámico |
+| `build_spy_payload(result, vix_regime)` | Payload SPY Specialist con 6-dim breakdown + claude_reasoning |
+| `build_payload(result, vix_regime)` | Payload legacy (APPROVE BUY) con 4-componente breakdown |
 | `build_close_payload(symbol, close_reason)` | Payload de cierre forzado (action="close") |
 | `build_no_signal_payload(reason)` | Payload informativo (status="no_signal") |
 

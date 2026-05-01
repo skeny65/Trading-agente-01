@@ -28,10 +28,25 @@
 │   FASE 3: ANÁLISIS POR SÍMBOLO (por cada símbolo en WATCHLIST)        │
 │      a. Skip si posición abierta (HOLDING)                             │
 │      b. Skip si en cooldown (24h)                                      │
-│      c. news_fetcher.fetch() → sentimiento VADER                       │
+│      c. news_fetcher.fetch() + sentiment_analyzer (VADER) — siempre   │
+│                                                                         │
+│      ── Ruta SPY (symbol == config.SYMBOL) ─────────────────────────   │
+│      d. spy_cycle.run() — orquesta 6 dimensiones:                     │
+│           D1 Macro (25%):        FRED inflation/employment/rates/Fed   │
+│           D2 Technical (20%):    multi-TF RSI/MACD/BB/SMA200          │
+│           D3 Components (20%):   top-10 holdings + sector breadth     │
+│           D4 Sentiment (15%):    VIX term + put/call + F&G + VADER    │
+│           D5 Events (10%):       FOMC + economic calendar + geopolit. │
+│           D6 Cross-Assets (10%): DXY/TLT/HYG/QQQ divergences         │
+│           → filters.evaluate() — vetos duros + score ≥0.72 + ≥5 dims │
+│           → claude_analyst.analyze() — validación final con Claude AI  │
+│           → SpyCycleResult (decision, size, trail%, claude_reasoning) │
+│                                                                         │
+│      ── Ruta legacy (otros símbolos) ───────────────────────────────   │
 │      d. opportunity_scorer.calculate() → score 0.0–1.0                │
 │      e. decision_engine.evaluate() → APPROVE / NO_SIGNAL               │
-│      f. Si APPROVE → build_payload → webhook → bot1                    │
+│                                                                         │
+│      f. Si APPROVE → build_spy_payload / build_payload → webhook→bot1 │
 │                                                                         │
 │   FASE 4: PERSISTENCIA                                                  │
 │      a. _write_cycle_report() → logs/YYYY-MM-DD_HH-MM-SS.json         │
@@ -209,12 +224,14 @@ logs/
 │
 └── trade_log.xlsx
     Registro Excel acumulativo. Una fila por simbolo por ciclo.
-    Columnas: timestamp, cycle_id, mode, symbol, status, decision, action,
-              precio, change_pct, sma20, sma50, trend_strength, volume_ratio,
-              sentiment_compound, label, fear_greed, vix, vix_regime,
-              score_trend, score_sentiment, score_macro, score_vix, score_total,
-              confidence, size, trail_percent, take_profit_pct, max_holding_days,
-              reason, webhook_status
+    Columnas base: timestamp, cycle_id, mode, symbol, status, decision, action,
+                   precio, change_pct, sma20, sma50, trend_strength, volume_ratio,
+                   sentiment_compound, label, fear_greed, vix, vix_regime,
+                   score_trend, score_sentiment, score_macro, score_vix, score_total,
+    Columnas SPY:  dim_macro, dim_technical, dim_components, dim_sentiment,
+                   dim_events, dim_cross_asset, dimensions_passing, claude_reasoning,
+    Sizing:        confidence, size, trail_percent, take_profit_pct,
+                   max_holding_days, reason, webhook_status
 ```
 
 ---
@@ -239,10 +256,16 @@ logs/
 | Fuente | Módulo | API Key | Coste | Fallback |
 |--------|--------|---------|-------|---------|
 | Yahoo Finance (precios, 60d) | market_data.py | No | Gratis | `None` → símbolo saltado |
-| Yahoo Finance (^VIX) | macro_indicators.py | No | Gratis | VIX = 20.0 |
+| Yahoo Finance (^VIX, multi-TF) | macro_indicators / technical | No | Gratis | VIX = 20.0 |
 | CNN Fear & Greed | macro_indicators.py | No | Gratis | score = 50.0 |
+| FRED API (CPI, PCE, NFP, tasas) | research/macro/*.py | Si | Gratis | score = 0.5 |
 | NewsAPI (4h window) | news_fetcher.py | Si | Gratis (100/día) | Lista vacía → neutral |
+| CBOE (put/call ratio) | sentiment/put_call_ratio.py | No | Gratis | ratio = None → neutral |
+| Trading Economics (calendar) | events/economic_calendar.py | No | Scraping | sin eventos |
+| fed.gov (FOMC dates) | events/fomc_calendar.py | No | Scraping | sin bloqueos |
+| Reuters RSS (geopolítica) | events/geopolitics_news.py | No | RSS | score = 0.5 |
 | VADER NLP | sentiment_analyzer.py | No (local) | Gratis | neutral si 0 titulares |
+| Claude AI (Anthropic API) | analysis/claude_analyst.py | Si | Pago por token | NO_SIGNAL fallback |
 | Telegram Bot API | telegram_notifier.py | Si (opcional) | Gratis | No-op si vacío |
 
 ---
@@ -254,11 +277,12 @@ logs/
 | URL | `http://127.0.0.1:8000/webhook/bot2` |
 | Header | `X-Webhook-Secret: {WEBHOOK_SECRET}` |
 | `strategy_id` | `"bot2_swing_trailing"` |
-| `params.source` | `"bot2"` |
+| `params.source` | `"bot2_spy_specialist"` (SPY) / `"bot2"` (legacy) |
 | `params.exit_strategy` | `"trailing_stop"` |
 | `params.trail_percent` | `3.0` / `4.0` / `5.5` segun vix_regime |
 | `params.vix_regime_at_entry` | `"low"` / `"moderate"` / `"high"` |
-| `params.research_summary` | Razón legible de la decisión |
-| `params.score_breakdown` | `{trend, sentiment, macro, vix}` — contribuciones ponderadas |
+| `params.research_summary` | Razón del filtro cascada |
+| `params.claude_reasoning` | Análisis narrativo de Claude (solo ruta SPY) |
+| `params.score_breakdown` | 6 dimensiones SPY o 4 componentes legacy |
 
 agente01 **no modifica bot1**. Se integra usando el contrato de webhook que bot1 ya tiene definido para el endpoint `/webhook/bot2`.

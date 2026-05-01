@@ -159,6 +159,7 @@ def _excel_row(
     size: float = 0.0,
     reason: str = "",
     webhook_status: str = "n/a",
+    spy_result: "SpyCycleResult | None" = None,
 ) -> dict:
     row: dict = {
         "timestamp_utc":  cycle_meta["timestamp_utc"],
@@ -208,6 +209,23 @@ def _excel_row(
             "trail_percent":    trail_config["trail_percent"],
             "take_profit_pct":  trail_config["take_profit_pct"],
             "max_holding_days": trail_config["max_holding_days"],
+        })
+    # SPY Specialist — dimensiones + Claude reasoning
+    if spy_result is not None:
+        dim = spy_result.dimension_scores
+        fr  = spy_result.filter_result
+        row.update({
+            "vix":              spy_result.vix_value,
+            "vix_regime":       spy_result.vix_regime,
+            "trail_percent":    spy_result.trail_percent,
+            "dim_macro":        round(dim.macro,       4) if dim else "",
+            "dim_technical":    round(dim.technical,   4) if dim else "",
+            "dim_components":   round(dim.components,  4) if dim else "",
+            "dim_sentiment":    round(dim.sentiment,   4) if dim else "",
+            "dim_events":       round(dim.events,      4) if dim else "",
+            "dim_cross_asset":  round(dim.cross_asset, 4) if dim else "",
+            "dimensions_passing": fr.dimensions_passing if fr else "",
+            "claude_reasoning": spy_result.claude_reasoning,
         })
     return row
 
@@ -410,19 +428,23 @@ def run_cycle() -> None:
             continue
 
         # Investigacion completa — SPY Specialist (6 dimensiones + Claude)
-        quote = quotes[symbol]
+        quote      = quotes[symbol]
+        headlines  = news_fetcher.fetch(symbol)
+        sentiment  = sentiment_analyzer.analyze(headlines)
+        score      = opportunity_scorer.calculate(quote, sentiment, macro)
+        spy_result = None
+
         if symbol == config.SYMBOL:
-            result = spy_cycle_run(symbol)
-            # Adaptar para compatibilidad con el resto del flujo
-            sentiment = sentiment_analyzer.analyze(news_fetcher.fetch(symbol))
-            score     = opportunity_scorer.calculate(quote, sentiment, macro)
+            result     = spy_cycle_run(symbol)
+            spy_result = result
         else:
-            headlines = news_fetcher.fetch(symbol)
-            sentiment = sentiment_analyzer.analyze(headlines)
-            score     = opportunity_scorer.calculate(quote, sentiment, macro)
-            result    = decision_engine.evaluate(symbol, quote, sentiment, macro, score)
+            result = decision_engine.evaluate(symbol, quote, sentiment, macro, score)
 
         # Relleno del reporte JSON
+        decision_str = (
+            result.decision if isinstance(result, SpyCycleResult)
+            else result.decision.value
+        )
         sym_report["status"] = "ANALYZED"
         sym_report["quote"] = {
             "price":          quote.price,
@@ -448,21 +470,27 @@ def run_cycle() -> None:
             "positive_ratio": sentiment.positive_ratio,
             "negative_ratio": sentiment.negative_ratio,
         }
-        sym_report["score"]    = dataclasses.asdict(score)
+        sym_report["score"] = dataclasses.asdict(score)
         sym_report["decision"] = {
-            "verdict":    result.decision.value,
-            "action":     result.action,
-            "confidence": result.confidence,
-            "size":       result.size,
-            "reason":     result.reason,
+            "verdict":           decision_str,
+            "action":            result.action,
+            "confidence":        result.confidence,
+            "size":              result.size,
+            "reason":            result.reason,
+            "claude_reasoning":  getattr(result, "claude_reasoning", None),
         }
+        if spy_result is not None:
+            sym_report["dimension_scores"] = {
+                "macro":       spy_result.dimension_scores.macro,
+                "technical":   spy_result.dimension_scores.technical,
+                "components":  spy_result.dimension_scores.components,
+                "sentiment":   spy_result.dimension_scores.sentiment,
+                "events":      spy_result.dimension_scores.events,
+                "cross_asset": spy_result.dimension_scores.cross_asset,
+            }
         sym_report["webhook_response"] = None
 
         # ── Envio ─────────────────────────────────────────────────────────────
-        decision_str = (
-            result.decision if isinstance(result, SpyCycleResult)
-            else result.decision.value
-        )
         if decision_str == "APPROVE":
             if isinstance(result, SpyCycleResult):
                 trail_config = signal_formatter.get_trail_config(result.vix_regime)
@@ -491,6 +519,7 @@ def run_cycle() -> None:
                     trail_config=trail_config,
                     confidence=result.confidence, size=result.size,
                     reason=result.reason, webhook_status="rejected",
+                    spy_result=spy_result,
                 ))
 
             elif isinstance(response, dict) and response.get("status") == "failed":
@@ -509,6 +538,7 @@ def run_cycle() -> None:
                     trail_config=trail_config,
                     confidence=result.confidence, size=result.size,
                     reason=result.reason, webhook_status="failed",
+                    spy_result=spy_result,
                 ))
 
             else:
@@ -535,6 +565,7 @@ def run_cycle() -> None:
                     "confidence": result.confidence,
                     "size": result.size,
                     "reason": result.reason,
+                    "claude_reasoning": getattr(result, "claude_reasoning", None),
                     "trail_config": trail_config,
                     "vix_regime": vix_regime_log,
                     "webhook_response": response,
@@ -547,6 +578,7 @@ def run_cycle() -> None:
                     trail_config=trail_config,
                     confidence=result.confidence, size=result.size,
                     reason=result.reason, webhook_status=wh_status,
+                    spy_result=spy_result,
                 ))
 
         else:
@@ -562,6 +594,7 @@ def run_cycle() -> None:
                 "decision": decision_str,
                 "reason": result.reason,
                 "score": score_total,
+                "claude_reasoning": getattr(result, "claude_reasoning", None),
             })
             excel_rows.append(_excel_row(
                 cycle_meta, symbol,
@@ -569,6 +602,7 @@ def run_cycle() -> None:
                 quote=quote, sentiment=sentiment, macro=macro, score=score,
                 confidence=result.confidence, size=0.0,
                 reason=result.reason, webhook_status="n/a",
+                spy_result=spy_result,
             ))
 
         report["symbols"][symbol] = sym_report

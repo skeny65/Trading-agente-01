@@ -36,6 +36,16 @@ COLUMNS = [
     "score_macro",
     "score_vix",
     "score_total",
+    # SPY Specialist — 6 dimensiones
+    "dim_macro",
+    "dim_technical",
+    "dim_components",
+    "dim_sentiment",
+    "dim_events",
+    "dim_cross_asset",
+    "dimensions_passing",
+    "claude_reasoning",
+    # Sizing & salida
     "confidence",
     "size",
     "trail_percent",
