@@ -55,8 +55,9 @@ def get_vix_term_structure() -> VixTermData:
     score_map = {"contango": 0.85, "flat": 0.55, "backwardation": 0.20, "unknown": 0.50}
     score = score_map.get(structure, 0.50)
 
+    vix3m_str = f"{vix3m:.1f}" if vix3m else "N/A"
     logger.info(
-        f"VIX term: 9D={vix9d:.1f} spot={vix:.1f} 3M={vix3m:.1f if vix3m else 'N/A'} "
+        f"VIX term: 9D={vix9d:.1f} spot={vix:.1f} 3M={vix3m_str} "
         f"| estructura={structure} | score={score:.2f}"
         if vix9d and vix else f"VIX term: datos parciales | score={score:.2f}"
     )

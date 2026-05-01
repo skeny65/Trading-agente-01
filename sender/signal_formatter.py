@@ -72,6 +72,46 @@ def build_payload(result: EvaluationResult, vix_regime: str) -> dict:
     }
 
 
+# ── Payload SPY Specialist (SpyCycleResult) ───────────────────────────────────
+
+def build_spy_payload(result, vix_regime: str) -> dict:
+    """Construye el payload de señal de compra para SpyCycleResult."""
+    now          = datetime.now(timezone.utc).isoformat()
+    trail_config = get_trail_config(vix_regime)
+    dim          = result.dimension_scores
+
+    return {
+        "timestamp": now,
+        "status":    "pending",
+        "processed": False,
+        "signal": {
+            "strategy_id": "bot2_swing_trailing",
+            "symbol":      result.symbol,
+            "action":      result.action,
+            "confidence":  result.confidence,
+            "size":        result.size,
+            "params": {
+                "source":              "bot2_spy_specialist",
+                "exit_strategy":       config.EXIT_STRATEGY,
+                "trail_percent":       result.trail_percent,
+                "take_profit_pct":     trail_config["take_profit_pct"],
+                "max_holding_days":    trail_config["max_holding_days"],
+                "vix_regime_at_entry": vix_regime,
+                "research_summary":    result.reason,
+                "claude_reasoning":    result.claude_reasoning,
+                "score_breakdown": {
+                    "macro":       round(dim.macro,       3) if dim else 0.0,
+                    "technical":   round(dim.technical,   3) if dim else 0.0,
+                    "components":  round(dim.components,  3) if dim else 0.0,
+                    "sentiment":   round(dim.sentiment,   3) if dim else 0.0,
+                    "events":      round(dim.events,      3) if dim else 0.0,
+                    "cross_asset": round(dim.cross_asset, 3) if dim else 0.0,
+                },
+            },
+        },
+    }
+
+
 # ── Payload de cierre forzado (invalidación de tesis) ────────────────────────
 
 def build_close_payload(symbol: str, close_reason: str) -> dict:

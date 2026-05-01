@@ -23,6 +23,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
 from analysis import decision_engine, exit_evaluator, opportunity_scorer, sentiment_analyzer
+from analysis.spy_cycle import run as spy_cycle_run, SpyCycleResult
 from excel_logger import append_excel_rows
 from research import macro_indicators, market_data, news_fetcher
 from sender import signal_formatter, telegram_notifier, webhook_client
@@ -408,12 +409,18 @@ def run_cycle() -> None:
             ))
             continue
 
-        # Investigacion completa
-        quote     = quotes[symbol]
-        headlines = news_fetcher.fetch(symbol)
-        sentiment = sentiment_analyzer.analyze(headlines)
-        score     = opportunity_scorer.calculate(quote, sentiment, macro)
-        result    = decision_engine.evaluate(symbol, quote, sentiment, macro, score)
+        # Investigacion completa — SPY Specialist (6 dimensiones + Claude)
+        quote = quotes[symbol]
+        if symbol == config.SYMBOL:
+            result = spy_cycle_run(symbol)
+            # Adaptar para compatibilidad con el resto del flujo
+            sentiment = sentiment_analyzer.analyze(news_fetcher.fetch(symbol))
+            score     = opportunity_scorer.calculate(quote, sentiment, macro)
+        else:
+            headlines = news_fetcher.fetch(symbol)
+            sentiment = sentiment_analyzer.analyze(headlines)
+            score     = opportunity_scorer.calculate(quote, sentiment, macro)
+            result    = decision_engine.evaluate(symbol, quote, sentiment, macro, score)
 
         # Relleno del reporte JSON
         sym_report["status"] = "ANALYZED"
@@ -452,9 +459,17 @@ def run_cycle() -> None:
         sym_report["webhook_response"] = None
 
         # ── Envio ─────────────────────────────────────────────────────────────
-        if result.decision.value == "APPROVE":
-            trail_config = signal_formatter.get_trail_config(macro.vix_regime)
-            payload      = signal_formatter.build_payload(result, macro.vix_regime)
+        decision_str = (
+            result.decision if isinstance(result, SpyCycleResult)
+            else result.decision.value
+        )
+        if decision_str == "APPROVE":
+            if isinstance(result, SpyCycleResult):
+                trail_config = signal_formatter.get_trail_config(result.vix_regime)
+                payload      = signal_formatter.build_spy_payload(result, result.vix_regime)
+            else:
+                trail_config = signal_formatter.get_trail_config(macro.vix_regime)
+                payload      = signal_formatter.build_payload(result, macro.vix_regime)
             response     = webhook_client.send(payload)
             sym_report["trail_config"]     = trail_config
             sym_report["webhook_response"] = response
@@ -497,14 +512,22 @@ def run_cycle() -> None:
                 ))
 
             else:
-                wh_status = "dry_run" if config.DRY_RUN else "sent"
+                wh_status      = "dry_run" if config.DRY_RUN else "sent"
+                active_regime  = (
+                    result.vix_regime if isinstance(result, SpyCycleResult)
+                    else macro.vix_regime
+                )
                 _mark_signal_sent(symbol, last_signals)
-                _add_open_position(symbol, macro.vix_regime, trail_config, result)
+                _add_open_position(symbol, active_regime, trail_config, result)
                 telegram_notifier.signal_sent(
                     symbol, result.action, result.confidence, result.size,
-                    trail_pct=trail_config["trail_percent"], vix_regime=macro.vix_regime,
+                    trail_pct=trail_config["trail_percent"], vix_regime=active_regime,
                 )
                 report["summary"]["approved"].append(symbol)
+                vix_regime_log = (
+                    result.vix_regime if isinstance(result, SpyCycleResult)
+                    else macro.vix_regime
+                )
                 _log_decision({
                     "ts": now_str, "symbol": symbol,
                     "decision": "APPROVE",
@@ -513,7 +536,7 @@ def run_cycle() -> None:
                     "size": result.size,
                     "reason": result.reason,
                     "trail_config": trail_config,
-                    "vix_regime": macro.vix_regime,
+                    "vix_regime": vix_regime_log,
                     "webhook_response": response,
                     "dry_run": config.DRY_RUN,
                 })
@@ -527,14 +550,18 @@ def run_cycle() -> None:
                 ))
 
         else:
-            no_signal_scores[symbol] = result.score.total
+            score_total = (
+                result.confidence if isinstance(result, SpyCycleResult)
+                else result.score.total
+            )
+            no_signal_scores[symbol] = score_total
             report["summary"]["no_signal"].append(symbol)
-            logger.info(f"{symbol}: {result.decision.value} - {result.reason}")
+            logger.info(f"{symbol}: {decision_str} - {result.reason}")
             _log_decision({
                 "ts": now_str, "symbol": symbol,
-                "decision": result.decision.value,
+                "decision": decision_str,
                 "reason": result.reason,
-                "score": result.score.total,
+                "score": score_total,
             })
             excel_rows.append(_excel_row(
                 cycle_meta, symbol,

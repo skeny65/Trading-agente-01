@@ -19,6 +19,11 @@ NEWSAPI_KEY: str = os.getenv("NEWSAPI_KEY", "")
 # ── FRED API (datos macroeconómicos oficiales US) ─────────────────────────────
 FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
 
+# ── Anthropic API (Claude — motor de análisis) ────────────────────────────────
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL: str      = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+CLAUDE_MAX_TOKENS: int = int(os.getenv("CLAUDE_MAX_TOKENS", "800"))
+
 # ── Webhook ───────────────────────────────────────────────────────────────────
 WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "")
 WEBHOOK_URL: str    = os.getenv("WEBHOOK_URL", "http://127.0.0.1:8000/webhook/bot2")
@@ -115,6 +120,8 @@ def validate() -> None:
         missing.append("WEBHOOK_SECRET")
     if not FRED_API_KEY:
         missing.append("FRED_API_KEY (obtener gratis en https://fred.stlouisfed.org/docs/api/api_key.html)")
+    if not ANTHROPIC_API_KEY:
+        missing.append("ANTHROPIC_API_KEY (obtener en https://console.anthropic.com)")
     if missing:
         raise EnvironmentError(
             f"Variables de entorno faltantes en .env: {', '.join(missing)}"
