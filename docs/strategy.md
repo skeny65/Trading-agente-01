@@ -1,133 +1,125 @@
-# Estrategia — Swing Trading con Trailing Stop Dinámico
+# Estrategia — SPY Specialist: Swing Trading con Trailing Stop Dinámico
 
 ## Objetivo
 
-agente01 opera bajo una estrategia de **swing trading** — posiciones de varios días que capturan movimientos de momentum sostenido. La salida ya no es un take-profit fijo: se usa un **trailing stop dinámico calibrado por el régimen de volatilidad (VIX)** en el momento de apertura.
+agente01 es un **especialista en SPY** (S&P 500 ETF). Investiga el mercado desde 6 dimensiones, aplica un pipeline de filtros en cascada, y usa Claude AI como motor de decisión final. El resultado es siempre binario: `APPROVE` (swing long SPY) o `NO_SIGNAL`.
 
-El agente investiga, decide y envía la señal. bot1 y Alpaca manejan la ejecución y el trailing.
+El agente investiga y decide. bot1 y Alpaca manejan la ejecución y el trailing stop.
 
 ---
 
-## Parámetros clave vs. versión anterior
+## Cambios vs. arquitectura legacy
 
-| Parámetro | Anterior | Swing | Justificación |
+| Parámetro | Legacy multi-símbolo | SPY Specialist | Justificación |
 |---|---|---|---|
-| Frecuencia de ciclo | 4 horas | **60 minutos** | Capturar catalysts intradía sin caer en ruido |
-| Umbral de score | 0.65 | **0.70** | Swing exige más calidad, menos trades |
-| Consenso requerido | 2/3 señales | **3/3 señales** | Posiciones de días requieren máxima alineación |
-| Cooldown por símbolo | 4 horas | **24 horas** | Un swing dura días, no se reabre en horas |
-| Take profit | 4% fijo | **Trailing dinámico** | Deja correr ganancias, respeta volatilidad |
-| Stop loss | 2% fijo | **Reemplazado por trailing** | El trailing actúa como stop dinámico |
-| Sizes de posición | 5% / 10% / 15% | **3% / 5% / 8%** | Más diversificación, hasta 12 posiciones |
-| Ventana de noticias | 6 horas | **4 horas** | Alineada al ciclo de 1h |
-| Peso trend en score | 30% | **40%** | La tendencia pesa más en swing |
-| Peso sentiment | 30% | **20%** | Menos dependencia de noticias cortas |
-| Watchlist | SPY, QQQ | **8 ETFs** | SPY, QQQ, IWM, DIA, XLK, XLF, XLE, XLV |
+| Símbolos | 8 ETFs (SPY, QQQ, IWM...) | **SPY únicamente** | Especialización profunda en un solo activo |
+| Dimensiones de análisis | 4 componentes | **6 dimensiones** | Macro FRED, técnico multi-TF, componentes, sentimiento, eventos, cross-assets |
+| Umbral de score | 0.70 | **0.72** | Mayor exigencia en el especialista |
+| Dimensiones mínimas | — | **5 de 6 > 0.55** | Gate adicional de calidad |
+| Motor de decisión | Reglas hardcoded | **Claude AI (Haiku)** | Validación narrativa + doble check |
+| Sizing | 3% / 5% / 8% | **8% / 12% / 18% / 25%** | 4 tiers calibrados al score SPY |
+| Fuentes de datos | 5 | **12+** | FRED API, CBOE, Trading Economics, fed.gov, Reuters RSS... |
+
+---
+
+## Las 6 Dimensiones
+
+| # | Dimensión | Peso | Fuente principal |
+|---|-----------|------|-----------------|
+| 1 | **Macro** | 25% | FRED API (CPI, PCE, NFP, Fed Funds Rate, yield curve) |
+| 2 | **Técnico** | 20% | yfinance multi-timeframe (1D / 4H / 1H): RSI, MACD, BB, SMA200 |
+| 3 | **Componentes** | 20% | Top-10 holdings SPY + 11 sectores SPDR |
+| 4 | **Sentimiento** | 15% | VIX term structure + Put/Call CBOE + Fear&Greed + VADER |
+| 5 | **Eventos** | 10% | FOMC + calendario económico + geopolítica |
+| 6 | **Cross-Assets** | 10% | DXY, TLT, HYG, QQQ, GLD, USO, BTC divergencias vs SPY |
+
+**Fórmula del score total:**
+```
+TOTAL = macro×0.25 + técnico×0.20 + componentes×0.20
+      + sentimiento×0.15 + eventos×0.10 + cross_assets×0.10
+```
+
+---
+
+## Pipeline de Filtros en Cascada
+
+### Paso 1 — Vetos Duros (→ NO_SIGNAL inmediato si alguno activo)
+
+| Veto | Condición |
+|------|-----------|
+| VIX extremo | VIX > 30 (pánico de mercado) |
+| FOMC próximo | Reunión Fed en < 24 horas |
+| Earnings top-10 | ≥ 3 holdings del top-10 SPY reportan en 48h |
+| RSI sobrecomprado | RSI diario > 75 |
+| Bajo SMA200 | Precio SPY < SMA200 diaria (régimen bajista) |
+| Macro invertida | Yield curve spread < -0.50% AND macro_score < 0.35 |
+
+### Paso 2 — Score compuesto
+
+Suma ponderada de las 6 dimensiones (0.0–1.0).
+
+### Paso 3 — Filtros suaves (multiplicadores)
+
+| Evento | Multiplicador de score |
+|--------|----------------------|
+| Evento EXTREME < 12h | veto directo |
+| Evento HIGH < 24h | × 0.85 (también ajusta trail -30%) |
+| Sin eventos | × 1.0 |
+
+### Paso 4 — Gate de aprobación
+
+```
+score × multiplicador >= 0.72
+AND
+dimensiones con score > 0.55  >=  5 de 6
+```
+
+### Paso 5 — Validación Claude AI
+
+Claude recibe el resultado del filtro + snapshot de mercado y puede:
+- Confirmar APPROVE (lo más frecuente si el filtro pasó)
+- Vetar la señal (override a NO_SIGNAL si detecta inconsistencias narrativas)
+- Refinar el tamaño/trail dentro del rango permitido
 
 ---
 
 ## Trailing Stop Dinámico por Régimen VIX
 
-El parámetro `trail_percent` que recibe bot1 no es fijo. Se calcula en el momento de apertura según el VIX actual:
-
 | Régimen VIX | VIX | trail_percent | take_profit | max_holding_days |
 |---|---|---|---|---|
 | `low` | < 15 | **3.0%** | null (sin TP, dejar correr) | 15 días |
-| `moderate` | 15–20 | **4.0%** | null | 10 días |
-| `high` | 20–30 | **5.5%** | **8.0%** (defensivo) | 7 días |
+| `moderate` | 15–25 | **4.0%** | null | 10 días |
+| `high` | 25–30 | **5.5%** | **8.0%** (defensivo) | 7 días |
 | `extreme` | > 30 | — | — | **No abrir** |
 
-**Razón**: un trailing del 3% con VIX en 25 te saca con cualquier vela normal. La volatilidad dicta el espacio que necesita el trade para respirar.
+Si hay evento de alto impacto < 24h: trail se ajusta × 0.70 (más ajustado = más defensivo).
+
+---
+
+## Position Sizing — 4 Tiers por Score
+
+| Score total | Tamaño | Variable config |
+|---|---|---|
+| >= 0.90 | **25%** del capital | SIZE_TIER_1 |
+| >= 0.82 | **18%** del capital | SIZE_TIER_2 |
+| >= 0.75 | **12%** del capital | SIZE_TIER_3 |
+| >= 0.72 | **8%** del capital | SIZE_TIER_4 |
 
 ---
 
 ## Ciclos Prioritarios
 
-Tres ciclos del día se marcan como `[PRIORITY]` en los logs porque coinciden con momentos clave del mercado:
-
 | Hora ET | Razón |
 |---|---|
-| **09:45** | Post-apertura — mercado asentado tras los primeros 15 min de alta volatilidad |
+| **09:45** | Post-apertura — mercado asentado tras los primeros 15 min |
 | **12:30** | Media sesión — sesión europea cerrada, momentum USA puro |
 | **15:30** | Pre-cierre — última decisión sobre exposición overnight |
 
----
-
-## Scoring Recalibrado
-
-```
-TOTAL = (trend × 40%) + (sentiment × 20%) + (macro × 25%) + (vix × 15%)
-```
-
-La tendencia pesa más porque en swing trading la dirección del precio es el factor dominante. El sentimiento de noticias de corto plazo baja de peso.
-
-**Lógica de trend_strength** (usa SMA20 y SMA50):
-
-| trend_strength | Condición | Score |
-|---|---|---|
-| `strong_bullish` | precio > SMA20 > SMA50 | 1.00 |
-| `bullish` | precio > SMA20, SMA20 ≈ SMA50 | 0.75 |
-| `neutral` | precio ≈ SMA20 | 0.50 |
-| `bearish` | precio < SMA20 | 0.25 |
-| `strong_bearish` | precio < SMA20 < SMA50 | 0.00 |
+Marcados como `[PRIORITY]` en los logs.
 
 ---
 
-## Motor de Decisión Actualizado
-
-**Regla 0** (nueva): Si `vix_regime == "extreme"` → `NO_SIGNAL` inmediato, no se abren posiciones.
-
-**Regla 1**: `score.total < 0.70` → `NO_SIGNAL`
-
-**Regla 2**: Consenso **3/3** (todas las señales deben apuntar a bullish):
-- `trend == "bullish"` ✓
-- `sentiment.label == "positive"` ✓
-- `macro_bias == "bullish"` ✓
-
-Si las 3 se cumplen → `APPROVE BUY`
-
-**Tamaño dinámico**:
-```
-score ≥ 0.85  →  size = 8%
-score ≥ 0.78  →  size = 5%
-score ≥ 0.70  →  size = 3%
-```
-
----
-
-## Invalidación de Tesis (exit_evaluator.py)
-
-En cada ciclo, el agente evalúa si una posición abierta debe cerrarse **antes de que el trailing de Alpaca se active**. Hay 4 triggers:
-
-| # | Trigger | Condición | Señal enviada |
-|---|---|---|---|
-| 1 | VIX spike extremo | `vix_regime == "extreme"` | `action: "close"`, reason: `vix_spike_extreme` |
-| 2 | Reversión con volumen | `trend == "bearish"` + `volume_ratio > 1.5` | `action: "close"`, reason: `trend_reversal_with_volume` |
-| 3 | Crash de sentimiento | `compound < -0.5` + `≥ 5 titulares` | `action: "close"`, reason: `sentiment_crash` |
-| 4 | Tiempo máximo | `elapsed_days >= max_holding_days` del régimen VIX de apertura | `action: "close"`, reason: `max_holding_reached` |
-
-El payload de cierre:
-```json
-{
-  "status": "pending",
-  "signal": {
-    "strategy_id": "bot2_swing_trailing",
-    "symbol": "SPY",
-    "action": "close",
-    "confidence": 1.0,
-    "size": 1.0,
-    "params": {
-      "source": "bot2",
-      "close_reason": "vix_spike_extreme: VIX=32.4",
-      "research_summary": "Cierre forzado: vix_spike_extreme: VIX=32.4"
-    }
-  }
-}
-```
-
----
-
-## Payload de Apertura (APPROVE BUY)
+## Payload de Apertura — SPY Specialist (APPROVE BUY)
 
 ```json
 {
@@ -136,21 +128,24 @@ El payload de cierre:
     "strategy_id": "bot2_swing_trailing",
     "symbol": "SPY",
     "action": "buy",
-    "confidence": 0.782,
-    "size": 0.05,
+    "confidence": 0.748,
+    "size": 0.12,
     "params": {
-      "source": "bot2",
+      "source": "bot2_spy_specialist",
       "exit_strategy": "trailing_stop",
       "trail_percent": 4.0,
       "take_profit_pct": null,
       "max_holding_days": 10,
       "vix_regime_at_entry": "moderate",
-      "research_summary": "Score 0.782 | 3/3 señales alcistas | trend=strong_bullish sentiment=positive macro=bullish",
+      "research_summary": "Score 0.748 | 5/6 dimensiones > 0.55 | size=12% | trail=4.0%",
+      "claude_reasoning": "Technical and cross-asset dimensions show bullish alignment with SPY above SMA200 and QQQ leading. Macro headwinds from elevated CPI remain a drag on the composite score. Approving with conservative sizing given 5/6 dimensions passing.",
       "score_breakdown": {
-        "sentiment": 0.168,
-        "trend":     0.300,
-        "macro":     0.180,
-        "news":      0.098
+        "macro":       0.512,
+        "technical":   0.810,
+        "components":  0.740,
+        "sentiment":   0.630,
+        "events":      0.700,
+        "cross_asset": 0.680
       }
     }
   }
@@ -159,9 +154,22 @@ El payload de cierre:
 
 ---
 
-## Seguimiento de Posiciones Abiertas
+## Invalidación de Tesis (exit_evaluator.py)
 
-El agente mantiene `state/open_positions.json` para saber qué posiciones están activas:
+Los 4 triggers de cierre forzado no cambiaron con la migración SPY Specialist:
+
+| # | Trigger | Condición |
+|---|---------|-----------|
+| 1 | VIX spike extremo | `vix_regime == "extreme"` |
+| 2 | Reversión con volumen | `trend == "bearish"` AND `volume_ratio > 1.5` |
+| 3 | Crash de sentimiento | `compound < -0.5` AND `headline_count >= 5` |
+| 4 | Tiempo máximo | `elapsed_days >= max_holding_days` del régimen VIX de apertura |
+
+---
+
+## Seguimiento de Posiciones
+
+`state/open_positions.json` — evita dobles entradas y habilita exit_evaluator:
 
 ```json
 {
@@ -170,29 +178,12 @@ El agente mantiene `state/open_positions.json` para saber qué posiciones están
     "vix_regime_at_entry": "moderate",
     "max_holding_days":    10,
     "action":              "buy",
-    "confidence":          0.782,
-    "size":                0.05
+    "confidence":          0.748,
+    "size":                0.12
   }
 }
 ```
 
 - Se agrega cuando bot1 confirma `"status": "executed"`
 - Se elimina cuando se envía un cierre forzado exitoso
-- Si el símbolo tiene posición abierta → el ciclo no abre otra entrada
-
----
-
-## Watchlist Recomendada
-
-ETFs de índice y sectoriales — alta liquidez, spreads mínimos, óptimos para swing:
-
-| ETF | Índice / Sector |
-|---|---|
-| SPY | S&P 500 |
-| QQQ | Nasdaq 100 |
-| IWM | Russell 2000 (small caps) |
-| DIA | Dow Jones |
-| XLK | Tecnología |
-| XLF | Financieras |
-| XLE | Energía |
-| XLV | Salud |
+- Si SPY tiene posición abierta → el ciclo lo salta (HOLDING) y no abre otra

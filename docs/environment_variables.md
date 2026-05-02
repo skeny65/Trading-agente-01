@@ -1,4 +1,4 @@
-# Variables de Entorno — agente01
+# Variables de Entorno — agente01 (SPY Specialist)
 
 Todas las variables se configuran en el archivo `.env` en la raíz del proyecto. Nunca commitear este archivo (está en `.gitignore`).
 
@@ -8,18 +8,34 @@ Usa `.env.example` como plantilla.
 
 ## Variables Obligatorias
 
-### NEWSAPI_KEY
-- **Descripción**: Clave de autenticación para NewsAPI.org
-- **Dónde obtenerla**: https://newsapi.org (plan gratuito: 100 requests/día)
-- **Ejemplo**: `NEWSAPI_KEY=d3bb2947e2c74b7692718602121a0083`
-- **Efecto si falta**: `config.validate()` aborta el arranque con error
+### ANTHROPIC_API_KEY
+- **Descripción**: Clave de autenticación para la API de Claude (Anthropic)
+- **Dónde obtenerla**: https://console.anthropic.com → API Keys
+- **Ejemplo**: `ANTHROPIC_API_KEY=sk-ant-api03-...`
+- **Efecto si falta**: `config.validate()` aborta el arranque con error. Claude AI no puede validar las señales.
 
 ### WEBHOOK_SECRET
 - **Descripción**: Secreto compartido entre agente01 y bot1 para autenticar webhooks
 - **Debe coincidir con**: el valor de `WEBHOOK_SECRET` en el `.env` de bot1 (Trading-bot)
-- **Ejemplo**: `WEBHOOK_SECRET=a_secure_random_string`
+- **Ejemplo**: `WEBHOOK_SECRET=a_secure_random_string_32chars_min`
 - **Efecto si falta**: `config.validate()` aborta el arranque con error
 - **Efecto si es incorrecto**: bot1 rechaza con HTTP 401
+
+---
+
+## Variables Recomendadas (con fallbacks funcionales si faltan)
+
+### FRED_API_KEY
+- **Descripción**: Clave para la API de datos macro de la Federal Reserve (FRED)
+- **Dónde obtenerla**: https://fred.stlouisfed.org/docs/api/api_key.html (gratuita)
+- **Ejemplo**: `FRED_API_KEY=abcdef1234567890abcdef1234567890`
+- **Efecto si falta**: La dimensión Macro usa score neutral (0.5). El agente sigue funcionando pero sin datos macro reales (CPI, PCE, NFP, yield curve).
+
+### NEWSAPI_KEY
+- **Descripción**: Clave para NewsAPI.org — titulares para el VADER sentiment
+- **Dónde obtenerla**: https://newsapi.org (plan gratuito: 100 requests/día)
+- **Ejemplo**: `NEWSAPI_KEY=d3bb2947e2c74b7692718602121a0083`
+- **Efecto si falta**: Sin titulares → VADER score es neutral (0.5). El componente VADER de sentimiento queda en fallback.
 
 ---
 
@@ -31,75 +47,87 @@ Usa `.env.example` como plantilla.
 - **Cuándo cambiar**: Si bot1 corre en otra máquina, usar la URL pública de ngrok
 - **Ejemplo**: `WEBHOOK_URL=http://127.0.0.1:8000/webhook/bot2`
 
-### WATCHLIST
-- **Descripción**: Símbolos que agente01 monitorea en cada ciclo, separados por coma
-- **Default**: `SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV`
-- **Símbolos soportados**: Cualquier ticker válido de Yahoo Finance (acciones, ETFs)
-- **Recomendación**: ETFs de índice de alta liquidez para swing trading
-- **Ejemplo**: `WATCHLIST=SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV`
+### SYMBOL
+- **Descripción**: Símbolo del SPY Specialist (no modificar)
+- **Default**: `SPY`
+- **Nota**: El sistema está diseñado exclusivamente para SPY
+- **Ejemplo**: `SYMBOL=SPY`
 
 ### CYCLE_INTERVAL_MINUTES
 - **Descripción**: Cada cuántos minutos se repite el ciclo de investigación
 - **Default**: `60`
-- **Nota**: El agente analiza solo en horario de mercado. Fuera del horario, el ciclo se omite pero el scheduler sigue corriendo.
+- **Nota**: El agente analiza solo en horario de mercado.
 - **Ejemplo**: `CYCLE_INTERVAL_MINUTES=60`
 
 ### MIN_CONFIDENCE
-- **Descripción**: Score mínimo que debe alcanzar un símbolo para pasar a la regla de consenso
-- **Default**: `0.70`
+- **Descripción**: Score mínimo (ajustado por multiplicador de eventos) para pasar el gate de aprobación
+- **Default**: `0.72`
 - **Rango**: 0.0–1.0 (más alto = más restrictivo = menos señales)
-- **Recomendado**: 0.70–0.80 para swing trading de calidad
-- **Ejemplo**: `MIN_CONFIDENCE=0.70`
+- **Nota**: El gate también exige MIN_DIMENSIONS_PASSING dimensiones > 0.55
+- **Ejemplo**: `MIN_CONFIDENCE=0.72`
 
-### CONSENSUS_REQUIRED
-- **Descripción**: Número de señales cualitativas bullish requeridas (de 3 posibles)
-- **Default**: `3`
-- **Nota**: Para swing trading se requiere 3/3 — tendencia, sentimiento y macro deben ser bullish simultáneamente
-- **Ejemplo**: `CONSENSUS_REQUIRED=3`
+### MIN_DIMENSIONS_PASSING
+- **Descripción**: Número mínimo de dimensiones con score > 0.55 para APPROVE
+- **Default**: `5`
+- **Rango**: 1–6 (5 de 6 es el estándar del SPY Specialist)
+- **Ejemplo**: `MIN_DIMENSIONS_PASSING=5`
 
 ### COOLDOWN_HOURS
-- **Descripción**: Ventana de tiempo después de enviar una señal en la que no se repite el mismo símbolo
+- **Descripción**: Ventana de tiempo después de enviar una señal en la que no se repite
 - **Default**: `24`
-- **Propósito**: Un swing dura días — no se reabre una posición en horas
+- **Nota**: Para SPY, el cooldown efectivo es "mientras haya posición abierta" (open_positions.json)
 - **Ejemplo**: `COOLDOWN_HOURS=24`
 
 ### NEWS_LOOKBACK_HOURS
 - **Descripción**: Ventana de tiempo hacia atrás para buscar noticias en NewsAPI
 - **Default**: `4`
-- **Relación con el ciclo**: 4h de noticias con ciclo de 1h → buena cobertura sin noticias obsoletas
 - **Ejemplo**: `NEWS_LOOKBACK_HOURS=4`
 
 ### PRICE_HISTORY_DAYS
 - **Descripción**: Días de historial de precios a descargar de Yahoo Finance
 - **Default**: `60`
-- **Por qué 60**: Necesario para calcular SMA50 con datos suficientes (mínimo 50 días)
+- **Por qué 60**: Necesario para calcular SMA50 con datos suficientes
 - **Ejemplo**: `PRICE_HISTORY_DAYS=60`
+
+---
+
+## Variables de Claude AI
+
+### CLAUDE_MODEL
+- **Descripción**: Modelo Claude usado como motor de decisión final
+- **Default**: `claude-haiku-4-5-20251001`
+- **Alternativas**: `claude-sonnet-4-6` (mayor capacidad, mayor costo)
+- **Nota**: El prompt del sistema usa `cache_control: ephemeral` para reducir costo por ciclo
+- **Ejemplo**: `CLAUDE_MODEL=claude-haiku-4-5-20251001`
+
+### CLAUDE_MAX_TOKENS
+- **Descripción**: Máximo de tokens en la respuesta de Claude
+- **Default**: `512`
+- **Nota**: Claude solo devuelve un JSON compacto — 512 es suficiente
+- **Ejemplo**: `CLAUDE_MAX_TOKENS=512`
 
 ---
 
 ## Variables de Trailing Stop Dinámico
 
 ### EXIT_STRATEGY
-- **Descripción**: Estrategia de salida enviada a bot1
 - **Default**: `trailing_stop`
-- **Nota**: Actualmente solo se soporta `trailing_stop`
+- **Nota**: Solo se soporta trailing_stop actualmente
 - **Ejemplo**: `EXIT_STRATEGY=trailing_stop`
 
 ### TRAIL_PERCENT_LOW_VIX
 - **Descripción**: Trailing stop para régimen VIX bajo (VIX < 15)
 - **Default**: `3.0` (3%)
-- **Justificación**: Mercado calmado — trailing ajustado para maximizar ganancias
 - **Ejemplo**: `TRAIL_PERCENT_LOW_VIX=3.0`
 
 ### TRAIL_PERCENT_MODERATE_VIX
-- **Descripción**: Trailing stop para régimen VIX moderado (VIX 15–20)
+- **Descripción**: Trailing stop para régimen VIX moderado (VIX 15–25)
 - **Default**: `4.0` (4%)
 - **Ejemplo**: `TRAIL_PERCENT_MODERATE_VIX=4.0`
 
 ### TRAIL_PERCENT_HIGH_VIX
-- **Descripción**: Trailing stop para régimen VIX alto (VIX 20–30)
+- **Descripción**: Trailing stop para régimen VIX alto (VIX 25–30)
 - **Default**: `5.5` (5.5%)
-- **Justificación**: Alta volatilidad — el trade necesita más espacio para respirar
 - **Ejemplo**: `TRAIL_PERCENT_HIGH_VIX=5.5`
 
 ### TAKE_PROFIT_HIGH_VIX
@@ -108,55 +136,41 @@ Usa `.env.example` como plantilla.
 - **Aplica**: Solo cuando `vix_regime == "high"`. En low/moderate se deja correr sin TP.
 - **Ejemplo**: `TAKE_PROFIT_HIGH_VIX=8.0`
 
-### BLOCK_NEW_ON_EXTREME_VIX
-- **Descripción**: Si `true`, bloquea la apertura de nuevas posiciones cuando VIX > 30
-- **Default**: `true`
-- **Ejemplo**: `BLOCK_NEW_ON_EXTREME_VIX=true`
-
 ### MAX_HOLDING_DAYS_LOW
-- **Descripción**: Días máximos de holding para régimen VIX bajo
 - **Default**: `15`
 - **Ejemplo**: `MAX_HOLDING_DAYS_LOW=15`
 
 ### MAX_HOLDING_DAYS_MODERATE
-- **Descripción**: Días máximos de holding para régimen VIX moderado
 - **Default**: `10`
 - **Ejemplo**: `MAX_HOLDING_DAYS_MODERATE=10`
 
 ### MAX_HOLDING_DAYS_HIGH
-- **Descripción**: Días máximos de holding para régimen VIX alto
 - **Default**: `7`
 - **Ejemplo**: `MAX_HOLDING_DAYS_HIGH=7`
 
 ---
 
-## Variables de Position Sizing
+## Variables de Position Sizing — 4 Tiers
 
-### SIZE_HIGH_CONFIDENCE
-- **Descripción**: Tamaño de posición cuando score >= 0.85
+### SIZE_TIER_1
+- **Descripción**: Tamaño de posición cuando score >= 0.90
+- **Default**: `0.25` (25% del capital)
+- **Ejemplo**: `SIZE_TIER_1=0.25`
+
+### SIZE_TIER_2
+- **Descripción**: Tamaño de posición cuando score >= 0.82
+- **Default**: `0.18` (18% del capital)
+- **Ejemplo**: `SIZE_TIER_2=0.18`
+
+### SIZE_TIER_3
+- **Descripción**: Tamaño de posición cuando score >= 0.75
+- **Default**: `0.12` (12% del capital)
+- **Ejemplo**: `SIZE_TIER_3=0.12`
+
+### SIZE_TIER_4
+- **Descripción**: Tamaño de posición cuando score >= 0.72 (mínimo para APPROVE)
 - **Default**: `0.08` (8% del capital)
-- **Ejemplo**: `SIZE_HIGH_CONFIDENCE=0.08`
-
-### SIZE_MEDIUM_CONFIDENCE
-- **Descripción**: Tamaño de posición cuando score >= 0.78
-- **Default**: `0.05` (5% del capital)
-- **Ejemplo**: `SIZE_MEDIUM_CONFIDENCE=0.05`
-
-### SIZE_LOW_CONFIDENCE
-- **Descripción**: Tamaño de posición cuando score >= 0.70 (mínimo para APPROVE)
-- **Default**: `0.03` (3% del capital)
-- **Ejemplo**: `SIZE_LOW_CONFIDENCE=0.03`
-
-### MAX_CONCURRENT_POSITIONS
-- **Descripción**: Número máximo de posiciones abiertas simultáneamente
-- **Default**: `12`
-- **Nota**: El agente usa `open_positions.json` para tracking, pero la limitación real la aplica bot1
-- **Ejemplo**: `MAX_CONCURRENT_POSITIONS=12`
-
-### MAX_TOTAL_EXPOSURE
-- **Descripción**: Exposición máxima total como fracción del capital (0.0–1.0)
-- **Default**: `0.80` (80%)
-- **Ejemplo**: `MAX_TOTAL_EXPOSURE=0.80`
+- **Ejemplo**: `SIZE_TIER_4=0.08`
 
 ---
 
@@ -190,53 +204,61 @@ Usa `.env.example` como plantilla.
 ## .env completo de referencia
 
 ```bash
-# ── NewsAPI ───────────────────────────────────────────────
+# ── Claude AI (requerido para el motor de decisión) ───────────
+ANTHROPIC_API_KEY=sk-ant-api03-tu_clave_aqui
+
+# ── FRED API (recomendado — dimensión Macro) ──────────────────
+FRED_API_KEY=tu_clave_fred
+
+# ── NewsAPI (opcional — VADER sentiment) ─────────────────────
 NEWSAPI_KEY=tu_api_key_de_newsapi
 
-# ── Webhook (bot1) ────────────────────────────────────────
-WEBHOOK_SECRET=mismo_secreto_que_bot1
+# ── Webhook (bot1) — requerido ────────────────────────────────
+WEBHOOK_SECRET=mismo_secreto_que_bot1_minimo_32_chars
 WEBHOOK_URL=http://127.0.0.1:8000/webhook/bot2
 
-# ── Simbolos a monitorear ─────────────────────────────────
-WATCHLIST=SPY,QQQ,IWM,DIA,XLK,XLF,XLE,XLV
+# ── Símbolo (no modificar) ────────────────────────────────────
+SYMBOL=SPY
 
-# ── Ciclo (en minutos) ────────────────────────────────────
+# ── Ciclo (en minutos) ────────────────────────────────────────
 CYCLE_INTERVAL_MINUTES=60
 
-# ── Umbrales de decision ──────────────────────────────────
-MIN_CONFIDENCE=0.70
-CONSENSUS_REQUIRED=3
+# ── Umbrales de decision ──────────────────────────────────────
+MIN_CONFIDENCE=0.72
+MIN_DIMENSIONS_PASSING=5
 COOLDOWN_HOURS=24
 
-# ── Ventanas de datos ─────────────────────────────────────
+# ── Ventanas de datos ─────────────────────────────────────────
 NEWS_LOOKBACK_HOURS=4
 PRICE_HISTORY_DAYS=60
 
-# ── Trailing stop dinamico por regimen VIX ────────────────
+# ── Claude AI ─────────────────────────────────────────────────
+CLAUDE_MODEL=claude-haiku-4-5-20251001
+CLAUDE_MAX_TOKENS=512
+
+# ── Trailing stop dinamico por regimen VIX ────────────────────
 EXIT_STRATEGY=trailing_stop
 TRAIL_PERCENT_LOW_VIX=3.0
 TRAIL_PERCENT_MODERATE_VIX=4.0
 TRAIL_PERCENT_HIGH_VIX=5.5
 TAKE_PROFIT_HIGH_VIX=8.0
-BLOCK_NEW_ON_EXTREME_VIX=true
 
 MAX_HOLDING_DAYS_LOW=15
 MAX_HOLDING_DAYS_MODERATE=10
 MAX_HOLDING_DAYS_HIGH=7
 
-# ── Position sizing conservador ───────────────────────────
-SIZE_HIGH_CONFIDENCE=0.08
-SIZE_MEDIUM_CONFIDENCE=0.05
-SIZE_LOW_CONFIDENCE=0.03
-MAX_CONCURRENT_POSITIONS=12
-MAX_TOTAL_EXPOSURE=0.80
+# ── Position sizing — 4 tiers ────────────────────────────────
+SIZE_TIER_1=0.25
+SIZE_TIER_2=0.18
+SIZE_TIER_3=0.12
+SIZE_TIER_4=0.08
 
-# ── Modo de operacion ─────────────────────────────────────
+# ── Modo de operacion ─────────────────────────────────────────
 # true  -> solo loguea, NO envia webhook real a bot1
 # false -> envia webhook real
 DRY_RUN=true
 
-# ── Telegram (opcional) ───────────────────────────────────
+# ── Telegram (opcional) ───────────────────────────────────────
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
@@ -247,5 +269,6 @@ TELEGRAM_CHAT_ID=
 
 - Agregar `.env` a `.gitignore` (ya configurado en este proyecto)
 - Usar secretos de al menos 32 caracteres para `WEBHOOK_SECRET`
-- Rotar `NEWSAPI_KEY` si se expone accidentalmente
-- No loguear el valor de `WEBHOOK_SECRET` en ningún módulo
+- Rotar `ANTHROPIC_API_KEY` y `FRED_API_KEY` si se exponen accidentalmente
+- No loguear el valor de `WEBHOOK_SECRET` ni `ANTHROPIC_API_KEY` en ningún módulo
+- `ANTHROPIC_API_KEY` tiene costo por uso — monitorear en console.anthropic.com
