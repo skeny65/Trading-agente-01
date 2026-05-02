@@ -1,127 +1,137 @@
 """
-run_analysis.py — Ejecuta un ciclo de analisis completo ignorando el horario de mercado.
+run_analysis.py — Ejecuta un ciclo SPY Specialist completo ignorando el horario de mercado.
 Util para probar el agente fuera del horario de trading.
-Siempre corre en DRY_RUN: nunca envia webhook real.
+Siempre corre en DRY_RUN: nunca envia webhook real a bot1.
 """
 import json
 import sys
+import io
 from datetime import datetime, timezone
-from pathlib import Path
+
+# Forzar UTF-8 en consolas Windows (cmd/PowerShell)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import config
 config.DRY_RUN = True
 
-from analysis import decision_engine, opportunity_scorer, sentiment_analyzer
-from research import macro_indicators, market_data, news_fetcher
+from analysis.spy_cycle import run as spy_cycle_run
 from sender import signal_formatter
 
-SEP  = "=" * 60
-SEP2 = "-" * 60
+SEP  = "=" * 65
+SEP2 = "-" * 65
 
 
 def run_analysis() -> None:
     started_at = datetime.now(timezone.utc)
     print(f"\n{SEP}")
-    print(f"  ANALISIS FORZADO — {started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    print(f"  Modo: DRY_RUN | Estrategia: Swing + Trailing Stop Dinamico")
-    print(f"  Watchlist: {config.WATCHLIST}")
-    print(f"  Umbral: {config.MIN_CONFIDENCE} | Consenso: {config.CONSENSUS_REQUIRED}/3 | Cooldown: {config.COOLDOWN_HOURS}h")
+    print(f"  SPY SPECIALIST — ANALISIS COMPLETO")
+    print(f"  {started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"  Modo: DRY_RUN | Symbol: {config.SYMBOL}")
+    print(f"  Umbral: {config.MIN_CONFIDENCE} | Dims min: {config.MIN_DIMENSIONS_PASSING}/6")
+    print(f"  Claude model: {config.CLAUDE_MODEL}")
     print(SEP)
 
-    # ── 1. Macro ──────────────────────────────────────────────────────────────
-    print("\n[1/3] Obteniendo contexto macro...")
-    macro = macro_indicators.get_macro_context()
-    print(f"  Fear & Greed : {macro.fear_greed_score} ({macro.fear_greed_label})")
-    print(f"  VIX          : {macro.vix:.2f} ({macro.vix_regime})")
-    print(f"  Macro Bias   : {macro.macro_bias}")
+    print("\n  Ejecutando pipeline SPY Specialist (6 dimensiones)...")
+    print("  Esto puede tardar 10-30 segundos mientras se consultan las fuentes.\n")
 
-    trail = signal_formatter.get_trail_config(macro.vix_regime)
-    print(f"  Trail config : {trail['trail_percent']}% trail | "
+    result = spy_cycle_run(config.SYMBOL)
+
+    # ── Dimensiones ─────────────────────────────────────────────────────────────
+    print(f"{SEP2}")
+    print(f"  DIMENSIONES DE ANALISIS")
+    print(SEP2)
+
+    dims = result.dimension_scores
+    if dims:
+        weights = {
+            "macro":       0.25,
+            "technical":   0.20,
+            "components":  0.20,
+            "sentiment":   0.15,
+            "events":      0.10,
+            "cross_asset": 0.10,
+        }
+        names = {
+            "macro":       "Macro       (FRED: CPI, NFP, yield curve)",
+            "technical":   "Tecnico     (1D/4H/1H: RSI, MACD, BB, SMA200)",
+            "components":  "Componentes (top-10 holdings + 11 sectores SPDR)",
+            "sentiment":   "Sentimiento (VIX term + P/C + Fear&Greed + VADER)",
+            "events":      "Eventos     (FOMC + calendario + Reuters)",
+            "cross_asset": "Cross-Asset (DXY, TLT, HYG, QQQ, GLD, BTC)",
+        }
+        total_weighted = 0.0
+        for key, w in weights.items():
+            score = getattr(dims, key, 0.0) or 0.0
+            contrib = score * w
+            total_weighted += contrib
+            flag = " OK" if score > 0.55 else " --"
+            print(f"  {names[key]:<48} {score:.3f} x {w:.0%} = {contrib:.3f}{flag}")
+        print(f"  {'-'*62}")
+        print(f"  {'SCORE TOTAL':<48} {total_weighted:.3f}")
+    else:
+        print("  (dimensiones no disponibles)")
+
+    # ── Filtros ──────────────────────────────────────────────────────────────────
+    print(f"\n{SEP2}")
+    print(f"  RESULTADO DEL PIPELINE DE FILTROS")
+    print(SEP2)
+
+    fr = result.filter_result
+    if fr:
+        dims_passing = fr.dimensions_passing
+        print(f"  Dimensiones > 0.55 : {dims_passing}/6  (minimo: {config.MIN_DIMENSIONS_PASSING})")
+        print(f"  Score ajustado     : {fr.total_score:.3f}")
+        if hasattr(fr, 'score_multiplier'):
+            print(f"  Multiplicador      : x{fr.score_multiplier:.2f}  (eventos proximos)")
+        print(f"  Gate aprobacion    : {'PASS ✓' if fr.approved else 'FAIL ✗'}")
+        if not fr.approved and hasattr(fr, 'reason'):
+            print(f"  Razon rechazo      : {fr.reason}")
+
+    # ── VIX y trailing ──────────────────────────────────────────────────────────
+    print(f"\n{SEP2}")
+    print(f"  MARKET SNAPSHOT")
+    print(SEP2)
+    print(f"  VIX           : {result.vix_value:.2f}  ({result.vix_regime})")
+    trail = signal_formatter.get_trail_config(result.vix_regime)
+    print(f"  Trail config  : {trail['trail_percent']}% trail | "
           f"TP={trail['take_profit_pct']}% | max {trail['max_holding_days']}d")
 
-    if macro.vix_regime == "extreme" and config.BLOCK_NEW_ON_EXTREME_VIX:
-        print(f"\n  [!] VIX EXTREMO — no se abririan nuevas posiciones este ciclo")
-
-    # ── 2. Precios ────────────────────────────────────────────────────────────
-    print("\n[2/3] Obteniendo datos de mercado...")
-    quotes = market_data.get_quotes(config.WATCHLIST)
-
-    # ── 3. Por simbolo ────────────────────────────────────────────────────────
-    print("\n[3/3] Analizando simbolos...")
-    results = []
-
-    for symbol in config.WATCHLIST:
+    # ── Claude reasoning ─────────────────────────────────────────────────────────
+    if result.claude_reasoning:
         print(f"\n{SEP2}")
-        print(f"  SIMBOLO: {symbol}")
+        print(f"  RAZONAMIENTO CLAUDE AI")
         print(SEP2)
+        # Wrap largo texto
+        reasoning = result.claude_reasoning
+        for i in range(0, len(reasoning), 70):
+            print(f"  {reasoning[i:i+70]}")
 
-        if symbol not in quotes:
-            print(f"  [!] Sin datos de mercado para {symbol} — saltando")
-            continue
-
-        quote     = quotes[symbol]
-        headlines = news_fetcher.fetch(symbol)
-        sentiment = sentiment_analyzer.analyze(headlines)
-        score     = opportunity_scorer.calculate(quote, sentiment, macro)
-        result    = decision_engine.evaluate(symbol, quote, sentiment, macro, score)
-
-        print(f"\n  Precio        : ${quote.price:.2f}  ({quote.change_pct:+.2f}%)")
-        print(f"  SMA20 / SMA50 : ${quote.sma20:.2f} / ${quote.sma50:.2f}")
-        print(f"  vs SMA20      : {quote.price_vs_sma20:+.2f}%")
-        print(f"  Tendencia     : {quote.trend_strength}")
-        print(f"  Vol Ratio     : {quote.volume_ratio:.2f}x")
-
-        print(f"\n  Titulares     : {sentiment.headline_count} en ultimas {config.NEWS_LOOKBACK_HOURS}h")
-        for h in headlines[:3]:
-            print(f"    - {h.title[:80]}")
-        if len(headlines) > 3:
-            print(f"    ... y {len(headlines)-3} mas")
-
-        print(f"\n  Sentiment     : {sentiment.compound:+.3f} ({sentiment.label})")
-        print(f"  Pos/Neg       : {sentiment.positive_ratio:.0%} pos / {sentiment.negative_ratio:.0%} neg")
-
-        print(f"\n  SCORE BREAKDOWN (pesos: trend 40% | sentiment 20% | macro 25% | vix 15%):")
-        print(f"    trend     : {score.trend:.3f} x 40% = {score.trend * 0.40:.3f}  ({quote.trend_strength})")
-        print(f"    sentiment : {score.sentiment:.3f} x 20% = {score.sentiment * 0.20:.3f}")
-        print(f"    macro     : {score.macro:.3f} x 25% = {score.macro * 0.25:.3f}")
-        print(f"    vix       : {score.vix:.3f} x 15% = {score.vix * 0.15:.3f}")
-        print(f"    TOTAL     : {score.total:.3f}  (umbral: {config.MIN_CONFIDENCE})")
-
-        print(f"\n  DECISION      : {result.decision.value}")
-        print(f"  Action        : {result.action}")
-        print(f"  Confidence    : {result.confidence:.3f}")
-        print(f"  Size          : {result.size}")
-        print(f"  Reason        : {result.reason}")
-
-        if result.decision.value == "APPROVE":
-            payload = signal_formatter.build_payload(result, macro.vix_regime)
-            print(f"\n  {'*'*50}")
-            print(f"  PAYLOAD QUE SE ENVIARIA POR WEBHOOK:")
-            print(f"  {'*'*50}")
-            print(json.dumps(payload, indent=4, ensure_ascii=False, default=str))
-
-        results.append({
-            "symbol":   symbol,
-            "decision": result.decision.value,
-            "score":    score.total,
-            "action":   result.action,
-            "strength": quote.trend_strength,
-            "reason":   result.reason,
-        })
-
-    # ── Resumen ───────────────────────────────────────────────────────────────
+    # ── Decision final ───────────────────────────────────────────────────────────
     print(f"\n{SEP}")
-    print("  RESUMEN DEL CICLO")
+    decision_icon = ">>> APPROVE <<<" if result.decision == "APPROVE" else "    NO_SIGNAL   "
+    print(f"  DECISION FINAL: {decision_icon}")
     print(SEP)
-    for r in results:
-        icon = "APPROVE " if r["decision"] == "APPROVE" else "        "
-        print(f"  {icon}  {r['symbol']:6s}  score={r['score']:.3f}  {r['strength']:15s}  {r['reason'][:50]}")
+    print(f"  Symbol     : {result.symbol}")
+    print(f"  Decision   : {result.decision}")
+    print(f"  Confidence : {result.confidence:.3f}")
+    print(f"  Size       : {result.size:.0%} del capital")
+    print(f"  Trail      : {result.trail_percent}%")
+    print(f"  VIX regime : {result.vix_regime}")
+    print(f"  Reason     : {result.reason}")
 
-    approved = [r for r in results if r["decision"] == "APPROVE"]
-    print(f"\n  Aprobados  : {len(approved)}/{len(results)}")
-    print(f"  Sin senal  : {len(results) - len(approved)}/{len(results)}")
-    print(f"  VIX regime : {macro.vix_regime} | Trail: {trail['trail_percent']}%")
-    print(f"\n  [DRY_RUN] Ningun webhook fue enviado.")
+    # ── Payload ──────────────────────────────────────────────────────────────────
+    if result.decision == "APPROVE":
+        from sender.signal_formatter import build_spy_payload
+        payload = build_spy_payload(result, result.vix_regime)
+        print(f"\n{SEP}")
+        print(f"  PAYLOAD QUE SE ENVIARIA A BOT1 (DRY_RUN — no enviado)")
+        print(SEP)
+        print(json.dumps(payload, indent=4, ensure_ascii=False, default=str))
+
+    print(f"\n{SEP}")
+    print(f"  [DRY_RUN] Ningun webhook fue enviado a bot1.")
+    print(f"  Para ejecutar en modo automatico: python agente01.py")
     print(SEP)
 
 

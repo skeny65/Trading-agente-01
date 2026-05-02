@@ -5,6 +5,7 @@ Ejecuta las 6 dimensiones de investigación, aplica el pipeline de
 filtros en cascada y llama al motor Claude para la decisión final.
 """
 import logging
+import time
 from dataclasses import dataclass
 
 import config
@@ -103,7 +104,7 @@ def run(symbol: str = "SPY") -> SpyCycleResult:
         employment = get_employment_data()
         rates      = get_rates_data()
         fed        = get_fed_watch_data()
-        yield_curve_spread = rates.spread_10y2y
+        yield_curve_spread = rates.yield_curve_spread
         ms = score_macro(
             inflation_score=inflation.score,
             employment_score=employment.score,
@@ -137,6 +138,7 @@ def run(symbol: str = "SPY") -> SpyCycleResult:
         es = score_events(score_multiplier=1.0, veto=False, geopolitics_score=0.5)
 
     # ── 3. Técnico ────────────────────────────────────────────────────────────
+    time.sleep(2)
     rsi_veto    = False
     sma200_veto = False
     try:
@@ -156,6 +158,7 @@ def run(symbol: str = "SPY") -> SpyCycleResult:
                              rsi_veto=False, sma200_veto=False, atr_veto=False)
 
     # ── 4. Componentes ────────────────────────────────────────────────────────
+    time.sleep(2)
     earnings_veto = False
     try:
         holdings      = get_top_holdings_data()
@@ -172,6 +175,7 @@ def run(symbol: str = "SPY") -> SpyCycleResult:
         cs = score_components(top10_score=0.5, sector_score=0.5, earnings_veto=False)
 
     # ── 5. Cross-assets ───────────────────────────────────────────────────────
+    time.sleep(2)
     try:
         cross = get_cross_asset_data(spy_change_5d=None)
         xas   = score_cross_asset(
@@ -183,6 +187,7 @@ def run(symbol: str = "SPY") -> SpyCycleResult:
         xas = score_cross_asset(cross_asset_score=0.5, divergences=[])
 
     # ── 6. Sentimiento ────────────────────────────────────────────────────────
+    time.sleep(2)
     vix_regime = "moderate"
     vix_value  = 20.0
     try:
