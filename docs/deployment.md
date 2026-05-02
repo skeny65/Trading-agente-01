@@ -75,7 +75,15 @@ curl http://localhost:8000/health
 python run_analysis.py
 ```
 
-Ejecuta un ciclo completo del SPY Specialist en DRY_RUN: 6 dimensiones, filtros en cascada, y Claude AI. Muestra el payload que se enviaría y los scores de cada dimensión.
+Ejecuta el ciclo SPY Specialist completo (6 dimensiones + Claude AI) en DRY_RUN — nunca envía webhook a bot1. Muestra scores por dimensión, resultado del pipeline de filtros, razonamiento de Claude y el payload que se enviaría si fuera APPROVE.
+
+### 6b. Prueba de integración completa (envía webhook real a bot1)
+
+```bash
+python test_integration.py
+```
+
+Igual que `run_analysis.py` pero **sí envía el webhook a bot1** y escribe la fila en `logs/trade_log.xlsx` y `state/decision_log.jsonl`. Útil para verificar la integración end-to-end antes de dejar el agente en producción. Confirma que bot1 recibe la señal y que los logs se escriben correctamente.
 
 ### 7. Ejecutar en modo DRY_RUN (ciclo automático)
 

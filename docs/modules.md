@@ -75,8 +75,17 @@ Módulo en la raíz del proyecto. Escribe una fila por símbolo por ciclo en `lo
 | `score_macro` | Score bruto de macro (0.0–1.0) |
 | `score_vix` | Score bruto de VIX (0.0–1.0) |
 | `score_total` | Score total ponderado (0.0–1.0) |
-| `confidence` | Mismo que score_total |
-| `size` | Fracción de capital asignada (0.03/0.05/0.08) |
+| `score_total` | Score total ponderado (0.0–1.0) |
+| `dim_macro` | Score dimensión Macro (0.0–1.0) |
+| `dim_technical` | Score dimensión Técnico (0.0–1.0) |
+| `dim_components` | Score dimensión Componentes (0.0–1.0) |
+| `dim_sentiment` | Score dimensión Sentimiento (0.0–1.0) |
+| `dim_events` | Score dimensión Eventos (0.0–1.0) |
+| `dim_cross_asset` | Score dimensión Cross-Assets (0.0–1.0) |
+| `dimensions_passing` | Número de dims con score > 0.55 (0–6) |
+| `claude_reasoning` | Razonamiento narrativo de Claude AI |
+| `confidence` | Score final ajustado |
+| `size` | Fracción de capital: 0.08 / 0.12 / 0.18 / 0.25 (4 tiers) |
 | `trail_percent` | Trailing stop % (3.0/4.0/5.5) — solo en APPROVE |
 | `take_profit_pct` | TP % (null o 8.0) — solo en APPROVE |
 | `max_holding_days` | Días máximos de la posición |
@@ -85,17 +94,37 @@ Módulo en la raíz del proyecto. Escribe una fila por símbolo por ciclo en `lo
 
 ---
 
-## run_analysis.py — Análisis Manual
+## run_analysis.py — Análisis Manual SPY Specialist
 
-Script para ejecutar un ciclo completo de análisis **ignorando el horario de mercado**. Útil para testing y verificación fuera del horario de trading.
+Script para ejecutar el ciclo SPY Specialist completo **ignorando el horario de mercado**. Útil para verificación y testing fuera del horario de trading.
 
-Siempre corre en modo `DRY_RUN=True` aunque el .env diga lo contrario.
+Siempre corre en modo `DRY_RUN=True` — nunca envía webhook real a bot1.
 
 ```bash
 python run_analysis.py
 ```
 
-Imprime: macro context (VIX, Fear&Greed, trail config), datos por símbolo (precio, SMA20, SMA50, trend_strength, sentimiento, score breakdown, decisión), y el payload exacto que se enviaría a bot1.
+Imprime: las 6 dimensiones con scores y contribuciones ponderadas, resultado del pipeline de filtros (gate), VIX y trail config, razonamiento de Claude AI, y el payload que se enviaría si fuera APPROVE.
+
+---
+
+## test_integration.py — Prueba de Integración Real
+
+Script para probar la integración completa end-to-end: investigación SPY Specialist real + webhook real a bot1 + escritura en Excel y decision_log. Ignora el horario de mercado.
+
+**A diferencia de `run_analysis.py`, este script SÍ envía el webhook a bot1** (DRY_RUN=False forzado internamente).
+
+```bash
+python test_integration.py
+```
+
+Ejecuta los 4 pasos:
+1. `spy_cycle.run("SPY")` — 6 dimensiones + Claude AI real
+2. `webhook_client.send(payload)` — envío real a bot1
+3. `append_excel_rows([row])` — escribe fila en `logs/trade_log.xlsx`
+4. Append a `state/decision_log.jsonl`
+
+Útil para verificar la integración completa antes de dejar el agente en producción.
 
 ---
 

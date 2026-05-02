@@ -122,14 +122,16 @@
     │                                                          │
     │  signal_formatter.py                                     │
     │  ├─ get_trail_config(vix_regime) → {trail%, tp%, days}   │
-    │  ├─ APPROVE → build_payload(result, vix_regime)          │
+    │  ├─ APPROVE SPY → build_spy_payload(result, vix_regime)  │
     │  │   strategy_id: "bot2_swing_trailing"                  │
-    │  │   source: "bot2"                                      │
+    │  │   source: "bot2_spy_specialist"                       │
     │  │   exit_strategy: "trailing_stop"                      │
     │  │   trail_percent: 3.0/4.0/5.5 segun VIX               │
     │  │   take_profit_pct: null o 8.0 segun VIX              │
     │  │   vix_regime_at_entry, max_holding_days               │
-    │  │   score_breakdown: {trend, sentiment, macro, vix}     │
+    │  │   claude_reasoning: razonamiento narrativo Claude AI  │
+    │  │   score_breakdown: {macro, technical, components,     │
+    │  │                     sentiment, events, cross_asset}   │
     │  ├─ EXIT → build_close_payload(symbol, close_reason)     │
     │  │   action: "close", confidence: 1.0, size: 1.0         │
     │  └─ NO_SIGNAL → build_no_signal_payload(reason)          │
@@ -183,8 +185,8 @@ state/
 │       "vix_regime_at_entry": "moderate",
 │       "max_holding_days": 10,
 │       "action": "buy",
-│       "confidence": 0.813,
-│       "size": 0.05
+│       "confidence": 0.748,
+│       "size": 0.12
 │     }
 │   }
 │   Posiciones activas. Evita dobles entradas y habilita exit_evaluator.
@@ -216,11 +218,12 @@ logs/
 │   ├── market_open (bool)
 │   ├── macro { fear_greed_score, vix, vix_regime, macro_bias }
 │   ├── symbols {
-│   │     SPY: { status, quote, headlines, sentiment, score, decision, webhook_response }
-│   │     QQQ: { status: "HOLDING", position: {...} }
-│   │     IWM: { status: "COOLDOWN" }
+│   │     SPY: { status, decision, confidence, size, trail_percent, vix_regime,
+│   │            vix_value, dimension_scores{macro,technical,components,sentiment,
+│   │            events,cross_asset}, dimensions_passing, claude_reasoning,
+│   │            reason, webhook_response }
 │   │   }
-│   └── summary { approved[], exits[], no_signal[], cooldown[], holding[], no_data[], ... }
+│   └── summary { approved[], exits[], no_signal[], holding[], webhook_failed[], ... }
 │
 └── trade_log.xlsx
     Registro Excel acumulativo. Una fila por simbolo por ciclo.
