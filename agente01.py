@@ -398,17 +398,21 @@ def run_cycle() -> None:
             continue
 
         if symbol not in quotes:
-            logger.warning(f"{symbol}: sin datos de mercado - saltando")
-            sym_report["status"] = "NO_DATA"
-            report["symbols"][symbol] = sym_report
-            report["summary"]["no_data"].append(symbol)
-            _log_decision({"ts": now_str, "symbol": symbol, "decision": "NO_DATA"})
-            excel_rows.append(_excel_row(
-                cycle_meta, symbol,
-                status="NO_DATA", decision="NO_DATA", action="none",
-                macro=macro, reason="Sin datos de mercado",
-            ))
-            continue
+            if symbol == config.SYMBOL:
+                # SPY Specialist busca sus propios datos internamente con fallbacks por dimension
+                logger.warning(f"{symbol}: sin quote inicial — ejecutando SPY Specialist de todas formas")
+            else:
+                logger.warning(f"{symbol}: sin datos de mercado - saltando")
+                sym_report["status"] = "NO_DATA"
+                report["symbols"][symbol] = sym_report
+                report["summary"]["no_data"].append(symbol)
+                _log_decision({"ts": now_str, "symbol": symbol, "decision": "NO_DATA"})
+                excel_rows.append(_excel_row(
+                    cycle_meta, symbol,
+                    status="NO_DATA", decision="NO_DATA", action="none",
+                    macro=macro, reason="Sin datos de mercado",
+                ))
+                continue
 
         if _is_on_cooldown(symbol, last_signals):
             logger.info(f"{symbol}: en cooldown ({config.COOLDOWN_HOURS}h) - saltando")
@@ -428,10 +432,10 @@ def run_cycle() -> None:
             continue
 
         # Investigacion completa — SPY Specialist (6 dimensiones + Claude)
-        quote      = quotes[symbol]
+        quote      = quotes.get(symbol)  # puede ser None si Yahoo fallo pero es SPY
         headlines  = news_fetcher.fetch(symbol)
         sentiment  = sentiment_analyzer.analyze(headlines)
-        score      = opportunity_scorer.calculate(quote, sentiment, macro)
+        score      = opportunity_scorer.calculate(quote, sentiment, macro) if quote else None
         spy_result = None
 
         if symbol == config.SYMBOL:
@@ -458,7 +462,7 @@ def run_cycle() -> None:
             "price_vs_sma20": quote.price_vs_sma20,
             "trend":          quote.trend,
             "trend_strength": quote.trend_strength,
-        }
+        } if quote else None
         sym_report["headlines_count"] = sentiment.headline_count
         sym_report["headlines"] = [
             {"title": h.title, "source": h.source, "published_at": h.published_at}
@@ -470,7 +474,7 @@ def run_cycle() -> None:
             "positive_ratio": sentiment.positive_ratio,
             "negative_ratio": sentiment.negative_ratio,
         }
-        sym_report["score"] = dataclasses.asdict(score)
+        sym_report["score"] = dataclasses.asdict(score) if score else None
         sym_report["decision"] = {
             "verdict":           decision_str,
             "action":            result.action,
