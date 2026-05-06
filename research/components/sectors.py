@@ -5,7 +5,7 @@ Cuántos sectores están en verde y cuál lidera/rezaga.
 import logging
 from dataclasses import dataclass
 
-import yfinance as yf
+from research import yf_client
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +48,19 @@ def get_sector_breadth() -> SectorBreadthData:
     symbols = [s["symbol"] for s in SECTOR_ETFS]
     sector_map = {s["symbol"]: s["sector"] for s in SECTOR_ETFS}
 
+    raw = yf_client.safe_download(symbols, period="10d", interval="1d",
+                                   progress=False, auto_adjust=True)
+    if raw is None:
+        logger.warning("Sectores: sin datos — score neutral 0.5")
+        return SectorBreadthData(
+            sectors=[], green_count=0, total_count=0,
+            breadth_ratio=0.5, leading_sector=None,
+            lagging_sector=None, tech_leading=False, score=0.5,
+        )
     try:
-        raw   = yf.download(symbols, period="10d", interval="1d",
-                            progress=False, auto_adjust=True)
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:
-        logger.warning(f"Sector breadth error: {exc}")
+        logger.warning(f"Sectores parse error: {exc}")
         return SectorBreadthData(
             sectors=[], green_count=0, total_count=0,
             breadth_ratio=0.5, leading_sector=None,

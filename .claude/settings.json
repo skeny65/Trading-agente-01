@@ -8,7 +8,8 @@
       "mcp__tradingview__tv_health_check",
       "mcp__tradingview__pine_get_source",
       "mcp__binance__BinanceWalletUserAsset",
-      "mcp__binance__BinanceWalletQueryUserWalletBalance"
+      "mcp__binance__BinanceWalletQueryUserWalletBalance",
+      "Bash(curl -s *)"
     ]
   }
 }

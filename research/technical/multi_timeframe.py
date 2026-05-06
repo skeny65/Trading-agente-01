@@ -6,9 +6,9 @@ import logging
 from dataclasses import dataclass, field
 
 import pandas as pd
-import yfinance as yf
 
 import config
+from research import yf_client
 from research.technical.indicators import get_indicators_snapshot
 from research.technical.key_levels import KeyLevels, get_key_levels
 
@@ -122,53 +122,53 @@ def _check_atr_anomaly(df_daily: pd.DataFrame) -> bool:
         return False
 
 
+_NEUTRAL_SIGNAL = TimeframeSignal(
+    timeframe="?", trend="neutral", rsi=50.0,
+    macd_bullish=False, above_sma200=None,
+    above_sma50=None, above_sma20=None,
+    vol_ratio=1.0, score=0.5,
+)
+
+
+def _neutral_result() -> MultiTimeframeAnalysis:
+    from research.technical.key_levels import KeyLevels
+    return MultiTimeframeAnalysis(
+        daily=_NEUTRAL_SIGNAL, four_h=_NEUTRAL_SIGNAL, one_h=_NEUTRAL_SIGNAL,
+        key_levels=KeyLevels(None, None, None, None, None, None, None, None, None),
+        alignment="mixed", bullish_count=0,
+        rsi_veto=False, sma200_veto=False, atr_veto=False,
+        overall_score=0.5,
+    )
+
+
 def get_multi_timeframe_analysis(symbol: str = None) -> MultiTimeframeAnalysis:
     """
     Descarga datos en 3 timeframes y analiza la alineación técnica.
-    Fallback: devuelve señal neutral si yfinance falla.
+    Retorna score neutral 0.5 si Yahoo Finance no está disponible.
     """
     sym = symbol or config.SYMBOL
 
-    try:
-        ticker = yf.Ticker(sym)
+    df_daily  = yf_client.safe_history(sym, period="1y",  interval="1d")
+    df_1h_raw = yf_client.safe_history(sym, period="60d", interval="1h")
+    df_1h     = yf_client.safe_history(sym, period="30d", interval="1h")
 
-        # Diario: 1 año para SMA200 y key levels
-        df_daily = ticker.history(period="1y", interval="1d")
-        # 4H: aproximamos resampling desde datos horarios de 60 días
-        df_1h_raw = ticker.history(period="60d", interval="1h")
+    if df_daily is None or df_1h is None:
+        logger.warning(f"Tecnico [{sym}]: sin datos — score neutral 0.5")
+        return _neutral_result()
+
+    try:
         df_4h = df_1h_raw.resample("4h").agg({
             "Open": "first", "High": "max", "Low": "min",
             "Close": "last", "Volume": "sum",
-        }).dropna()
-        # 1H: 30 días a resolución horaria
-        df_1h = ticker.history(period="30d", interval="1h")
+        }).dropna() if df_1h_raw is not None else pd.DataFrame()
+    except Exception:
+        df_4h = pd.DataFrame()
 
-        if df_daily.empty or df_1h.empty:
-            raise ValueError("yfinance retornó DataFrames vacíos")
-
-    except Exception as exc:
-        logger.warning(f"MultiTimeframe fetch error ({sym}): {exc}")
-        neutral = TimeframeSignal(
-            timeframe="?", trend="neutral", rsi=50.0,
-            macd_bullish=False, above_sma200=None,
-            above_sma50=None, above_sma20=None,
-            vol_ratio=1.0, score=0.5,
-        )
-        from research.technical.key_levels import KeyLevels
-        return MultiTimeframeAnalysis(
-            daily=neutral, four_h=neutral, one_h=neutral,
-            key_levels=KeyLevels(None,None,None,None,None,None,None,None,None),
-            alignment="mixed", bullish_count=0,
-            rsi_veto=False, sma200_veto=False, atr_veto=False,
-            overall_score=0.5,
-        )
-
-    daily_tf = _analyze_timeframe(df_daily, "1D")
-    four_h_tf = _analyze_timeframe(df_4h, "4H") if not df_4h.empty else daily_tf
+    daily_tf  = _analyze_timeframe(df_daily, "1D")
+    four_h_tf = _analyze_timeframe(df_4h, "4H") if not df_4h.empty else _NEUTRAL_SIGNAL
     one_h_tf  = _analyze_timeframe(df_1h, "1H")
     levels    = get_key_levels(df_daily)
 
-    # Contar timeframes bullish
     bullish_count = sum([
         daily_tf.trend == "bullish",
         four_h_tf.trend == "bullish",
@@ -177,18 +177,16 @@ def get_multi_timeframe_analysis(symbol: str = None) -> MultiTimeframeAnalysis:
 
     alignment = "bullish" if bullish_count >= 2 else ("bearish" if bullish_count == 0 else "mixed")
 
-    # Vetos técnicos
     rsi_veto    = bool(daily_tf.rsi and daily_tf.rsi > 75)
     sma200_veto = daily_tf.above_sma200 is False
     atr_veto    = _check_atr_anomaly(df_daily)
 
-    # Score compuesto (pesos: diario 50%, 4H 30%, 1H 20%)
-    base_score = (daily_tf.score * 0.50 + four_h_tf.score * 0.30 + one_h_tf.score * 0.20)
+    base_score    = daily_tf.score * 0.50 + four_h_tf.score * 0.30 + one_h_tf.score * 0.20
     overall_score = 0.0 if (rsi_veto or sma200_veto) else base_score
 
     logger.info(
-        f"Técnico [{sym}]: 1D={daily_tf.trend} 4H={four_h_tf.trend} 1H={one_h_tf.trend} "
-        f"| alineación={alignment} ({bullish_count}/3) | score={overall_score:.2f}"
+        f"Tecnico [{sym}]: 1D={daily_tf.trend} 4H={four_h_tf.trend} 1H={one_h_tf.trend} "
+        f"| alineacion={alignment} ({bullish_count}/3) | score={overall_score:.2f}"
         + (" [RSI_VETO]" if rsi_veto else "")
         + (" [SMA200_VETO]" if sma200_veto else "")
         + (" [ATR_VETO]" if atr_veto else "")

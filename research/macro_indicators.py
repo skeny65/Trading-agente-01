@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import requests
-import yfinance as yf
+
+from research import yf_client
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +35,11 @@ def _fetch_fear_greed() -> tuple[float, str]:
 
 
 def _fetch_vix() -> float:
-    try:
-        hist = yf.Ticker("^VIX").history(period="2d")
-        if hist.empty:
-            return 20.0
-        return round(float(hist["Close"].iloc[-1]), 2)
-    except Exception as e:
-        logger.warning(f"VIX no disponible: {e}")
+    hist = yf_client.safe_history("^VIX", period="2d")
+    if hist is None or hist.empty:
+        logger.warning("VIX no disponible — usando fallback 20.0")
         return 20.0
+    return round(float(hist["Close"].iloc[-1]), 2)
 
 
 def _fear_greed_label(score: float) -> str:

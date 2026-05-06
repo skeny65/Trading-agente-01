@@ -6,9 +6,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-import yfinance as yf
-
 import config
+from research import yf_client
 from research.components.top_holdings import SPY_TOP_10
 
 logger = logging.getLogger(__name__)
@@ -33,12 +32,14 @@ class EarningsData:
 
 
 def _get_earnings_date(symbol: str) -> str | None:
+    if yf_client.is_blocked():
+        return None
     try:
-        ticker   = yf.Ticker(symbol)
-        cal      = ticker.calendar
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        cal    = ticker.calendar
         if cal is None or cal.empty:
             return None
-        # yfinance retorna un DataFrame con 'Earnings Date' como columna
         if "Earnings Date" in cal.columns:
             date = cal["Earnings Date"].iloc[0]
         elif "Earnings Date" in cal.index:
@@ -46,7 +47,9 @@ def _get_earnings_date(symbol: str) -> str | None:
         else:
             return None
         return str(date)[:10] if date else None
-    except Exception:
+    except Exception as exc:
+        if yf_client._is_rate_limit(exc):
+            yf_client._mark_blocked()
         return None
 
 

@@ -25,7 +25,7 @@ import config
 from analysis import decision_engine, exit_evaluator, opportunity_scorer, sentiment_analyzer
 from analysis.spy_cycle import run as spy_cycle_run, SpyCycleResult
 from excel_logger import append_excel_rows
-from research import macro_indicators, market_data, news_fetcher
+from research import macro_indicators, market_data, news_fetcher, yf_client
 from sender import signal_formatter, telegram_notifier, webhook_client
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -232,6 +232,7 @@ def _excel_row(
 
 # ── Ciclo principal ───────────────────────────────────────────────────────────
 def run_cycle() -> None:
+    yf_client.reset()  # nuevo ciclo → Yahoo Finance puede volver a intentar
     started_at  = datetime.now(timezone.utc)
     cycle_id    = started_at.strftime("%Y-%m-%d_%H-%M-%S")
     t0          = time.monotonic()

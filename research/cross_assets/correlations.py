@@ -5,7 +5,7 @@ Detecta divergencias que pueden anticipar movimientos en el S&P 500.
 import logging
 from dataclasses import dataclass
 
-import yfinance as yf
+from research import yf_client
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +54,19 @@ def get_cross_asset_data(spy_change_5d: float | None = None) -> CrossAssetData:
     symbols = list(CROSS_ASSETS.keys())
     assets: dict[str, AssetSignal] = {}
 
+    raw = yf_client.safe_download(symbols, period="15d", interval="1d",
+                                   progress=False, auto_adjust=True)
+    if raw is None:
+        logger.warning("Cross-assets: sin datos — score neutral 0.5")
+        return CrossAssetData(
+            assets={}, dxy_bullish=None, tlt_bullish=None,
+            hyg_bullish=None, qqq_leading=None,
+            divergences=[], score=0.5,
+        )
     try:
-        raw   = yf.download(symbols, period="15d", interval="1d",
-                            progress=False, auto_adjust=True)
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:
-        logger.warning(f"Cross-assets fetch error: {exc}")
+        logger.warning(f"Cross-assets parse error: {exc}")
         return CrossAssetData(
             assets={}, dxy_bullish=None, tlt_bullish=None,
             hyg_bullish=None, qqq_leading=None,

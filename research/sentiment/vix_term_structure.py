@@ -5,7 +5,7 @@ Contango = calma (normal). Backwardation = estrés agudo.
 import logging
 from dataclasses import dataclass
 
-import yfinance as yf
+from research import yf_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,14 @@ class VixTermData:
 
 
 def get_vix_term_structure() -> VixTermData:
+    raw = yf_client.safe_download(
+        ["^VIX9D", "^VIX", "^VIX3M"],
+        period="2d", interval="1d", progress=False, auto_adjust=False,
+    )
+    if raw is None:
+        return VixTermData(vix9d=None, vix=None, vix3m=None, structure="unknown", score=0.5)
+
     try:
-        raw = yf.download(["^VIX9D", "^VIX", "^VIX3M"],
-                          period="2d", interval="1d",
-                          progress=False, auto_adjust=False)
         close = raw["Close"] if "Close" in raw else raw
 
         def last(sym: str) -> float | None:
@@ -36,7 +40,7 @@ def get_vix_term_structure() -> VixTermData:
         vix   = last("^VIX")
         vix3m = last("^VIX3M")
     except Exception as exc:
-        logger.debug(f"VIX term structure error: {exc}")
+        logger.debug(f"VIX term structure parse error: {exc}")
         return VixTermData(vix9d=None, vix=None, vix3m=None, structure="unknown", score=0.5)
 
     # Determinar estructura

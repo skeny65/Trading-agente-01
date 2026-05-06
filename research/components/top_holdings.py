@@ -5,7 +5,7 @@ Fuente: yfinance. Pesos estáticos (actualizar si cambian significativamente).
 import logging
 from dataclasses import dataclass
 
-import yfinance as yf
+from research import yf_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +45,15 @@ def get_top_holdings_data() -> TopHoldingsData:
     symbols = [h["symbol"] for h in SPY_TOP_10]
     weights = {h["symbol"]: h["weight"] for h in SPY_TOP_10}
 
+    raw = yf_client.safe_download(symbols, period="30d", interval="1d",
+                                   progress=False, auto_adjust=True)
+    if raw is None:
+        logger.warning("Top holdings: sin datos — score neutral 0.5")
+        return TopHoldingsData(holdings=[], weighted_avg_1d=None, bullish_count=0, score=0.5)
     try:
-        raw = yf.download(symbols, period="30d", interval="1d",
-                          progress=False, auto_adjust=True)
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:
-        logger.warning(f"Top holdings fetch error: {exc}")
+        logger.warning(f"Top holdings parse error: {exc}")
         return TopHoldingsData(holdings=[], weighted_avg_1d=None, bullish_count=0, score=0.5)
 
     holdings: list[HoldingPerf] = []
