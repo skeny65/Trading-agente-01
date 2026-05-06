@@ -5,6 +5,8 @@ Cuántos sectores están en verde y cuál lidera/rezaga.
 import logging
 from dataclasses import dataclass
 
+import pandas as pd
+
 from research import yf_client, td_client
 
 logger = logging.getLogger(__name__)
@@ -48,37 +50,39 @@ def get_sector_breadth() -> SectorBreadthData:
     symbols = [s["symbol"] for s in SECTOR_ETFS]
     sector_map = {s["symbol"]: s["sector"] for s in SECTOR_ETFS}
 
+    # Ambas fuentes corren simultáneamente
     raw = yf_client.safe_download(symbols, period="10d", interval="1d",
                                    progress=False, auto_adjust=True)
 
-    # Fallback a Twelve Data si Yahoo está bloqueado
-    if raw is None:
-        if not td_client.is_blocked() and td_client.remaining_calls() >= len(symbols):
-            logger.info("Sectores: fallback a Twelve Data")
-            td_results = td_client.safe_batch_close(symbols, interval="1day", outputsize=10)
-            frames = {s: df["Close"] for s, df in td_results.items() if df is not None and "Close" in df}
-            if frames:
-                raw = pd.DataFrame(frames)
-                raw.columns = pd.MultiIndex.from_product([["Close"], raw.columns])
-            else:
-                logger.warning("Sectores: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
-                return SectorBreadthData(
-                    sectors=[], green_count=0, total_count=0,
-                    breadth_ratio=0.5, leading_sector=None,
-                    lagging_sector=None, tech_leading=False, score=0.5,
-                )
-        else:
-            logger.warning("Sectores: sin datos — score neutral 0.5")
-            return SectorBreadthData(
-                sectors=[], green_count=0, total_count=0,
-                breadth_ratio=0.5, leading_sector=None,
-                lagging_sector=None, tech_leading=False, score=0.5,
-            )
+    if not td_client.is_blocked() and td_client.remaining_calls() >= len(symbols):
+        td_results = td_client.safe_batch_close(symbols, interval="1day", outputsize=10)
+    else:
+        td_results = {}
 
-    try:
-        close = raw["Close"] if "Close" in raw else raw
-    except Exception as exc:
-        logger.warning(f"Sectores parse error: {exc}")
+    # Construir DataFrame combinado: Yahoo base + TD rellena símbolos que faltan
+    if raw is not None:
+        try:
+            yf_close = raw["Close"] if "Close" in raw else raw
+        except Exception:
+            yf_close = pd.DataFrame()
+    else:
+        yf_close = pd.DataFrame()
+        logger.info("Sectores: Yahoo no disponible — usando sólo Twelve Data")
+
+    td_frames: dict = {}
+    for sym, df in td_results.items():
+        if df is not None and "Close" in df:
+            if sym not in yf_close.columns:
+                td_frames[sym] = df["Close"]
+
+    if td_frames:
+        td_df = pd.DataFrame(td_frames)
+        close = pd.concat([yf_close, td_df], axis=1) if not yf_close.empty else td_df
+    else:
+        close = yf_close
+
+    if close.empty:
+        logger.warning("Sectores: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
         return SectorBreadthData(
             sectors=[], green_count=0, total_count=0,
             breadth_ratio=0.5, leading_sector=None,

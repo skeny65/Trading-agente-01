@@ -26,9 +26,18 @@ class Quote:
 
 
 def get_quote(symbol: str) -> "Quote | None":
-    hist = yf_client.safe_history(symbol, period=f"{config.PRICE_HISTORY_DAYS}d")
-    if hist is None:
-        hist = td_client.safe_time_series(symbol, interval="1day", outputsize=config.PRICE_HISTORY_DAYS)
+    df_yf = yf_client.safe_history(symbol, period=f"{config.PRICE_HISTORY_DAYS}d")
+    df_td = td_client.safe_time_series(symbol, interval="1day", outputsize=config.PRICE_HISTORY_DAYS)
+
+    # Yahoo preferido si disponible; TD cubre cuando Yahoo falla o falta volumen
+    if df_yf is not None and df_td is not None:
+        # Combinar: usar Yahoo para todo pero llenar Volume con TD si Yahoo lo trae vacío
+        if df_yf["Volume"].sum() == 0 and "Volume" in df_td.columns:
+            df_yf["Volume"] = df_td["Volume"].reindex(df_yf.index, method="nearest")
+        hist = df_yf
+    else:
+        hist = df_yf if df_yf is not None else df_td
+
     if hist is None or len(hist) < 21:
         return None
 

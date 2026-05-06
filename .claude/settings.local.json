@@ -4,7 +4,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(python3 -)",
-      "Bash(venv/Scripts/python -c ' *)"
+      "Bash(venv/Scripts/python -c ' *)",
+      "Bash(grep -i \"twelve\\\\|td_api\\\\|twelvedata\" .env .env.example)",
+      "Bash(grep -i \"twelve\\\\|td_api\" config.py)"
     ]
   }
 }

@@ -36,11 +36,11 @@ pip install -r requirements.txt
 Las dependencias incluyen:
 - `requests`, `python-dotenv`, `apscheduler`, `pytz` — core
 - `anthropic` — SDK oficial Claude AI (motor de decisión)
-- `yfinance` — datos de mercado multi-timeframe
+- `yfinance` — datos de mercado Yahoo Finance (multi-timeframe, precios, VIX)
 - `ta` — indicadores técnicos (RSI, MACD, Bollinger Bands)
-- `yahooquery` — holdings SPY y sectores
 - `vaderSentiment` — análisis de sentimiento NLP (corre local)
 - `openpyxl` — registro en trade_log.xlsx
+- `requests` ya incluye soporte para Twelve Data (REST API pura, sin librería adicional)
 
 ### 4. Configurar credenciales
 
@@ -60,6 +60,7 @@ WEBHOOK_SECRET=mismo_secreto_que_bot1_minimo_32_chars
 ```
 FRED_API_KEY=tu_clave_fred
 NEWSAPI_KEY=tu_clave_newsapi
+TWELVE_DATA_API_KEY=tu_clave_twelvedata   # fuente de precios paralela a Yahoo
 ```
 
 ### 5. Verificar que bot1 está corriendo

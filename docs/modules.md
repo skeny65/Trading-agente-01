@@ -128,9 +128,34 @@ Ejecuta los 4 pasos:
 
 ---
 
+## research/yf_client.py
+
+Wrapper seguro para Yahoo Finance con circuit breaker automático.
+
+- Al primer error 429 / rate-limit → bloquea todas las llamadas durante ~55 minutos.
+- `reset()` al inicio de cada ciclo para darle a Yahoo una nueva oportunidad.
+- `safe_history(symbol, **kwargs)` → `pd.DataFrame | None`
+- `safe_download(symbols, **kwargs)` → `pd.DataFrame | None`
+- `is_blocked()` → bool
+
+---
+
+## research/td_client.py
+
+Cliente REST para Twelve Data (free tier: 800 calls/día) con circuit breaker y contador diario.
+
+- Soporta los mismos símbolos que yfinance con mapeo automático (ej. `BTC-USD` → `BTC/USD`, `DX-Y.NYB` → `DXY`).
+- `safe_time_series(yf_symbol, interval, outputsize)` → `pd.DataFrame | None`
+- `safe_batch_close(yf_symbols, interval, outputsize)` → `dict[str, pd.DataFrame | None]`
+- `remaining_calls()` → int (cuota diaria restante)
+- `is_blocked()` → bool (verifica circuito Y cuota)
+- `reset()` → limpia el bloqueo temporal; el contador diario persiste entre ciclos.
+
+---
+
 ## research/market_data.py
 
-Obtiene datos de precio y tendencia de Yahoo Finance (sin API key).
+Obtiene datos de precio y tendencia usando **Yahoo Finance y Twelve Data simultáneamente** (sin API key para Yahoo; `TWELVE_DATA_API_KEY` para TD).
 
 **Dataclass `Quote`:**
 ```
@@ -160,11 +185,17 @@ precio < SMA20 < SMA50   →  "strong_bearish"   (score base 0.00)
 
 **Historial:** 60 días (necesario para calcular SMA50 con suficientes datos).
 
+**Lógica de fuentes dual:**
+- Yahoo y Twelve Data se llaman siempre en simultáneo.
+- Si ambos disponibles: usa Yahoo; rellena `Volume` con TD si Yahoo lo trae vacío.
+- Si solo uno disponible: usa el que respondió.
+- Si ambos fallan: retorna `None` → SPY Specialist continúa con score neutral en la dimensión afectada.
+
 **Funciones:**
 
 | Función | Descripción |
 |---------|-------------|
-| `get_quote(symbol)` | Retorna `Quote` o `None` si falla |
+| `get_quote(symbol)` | Retorna `Quote` o `None` si ambas fuentes fallan |
 | `get_quotes(symbols)` | Procesa lista completa, retorna `dict[str, Quote]` |
 
 ---

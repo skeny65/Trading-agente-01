@@ -49,11 +49,13 @@ INICIO DEL CICLO (cada 60 min via APScheduler)
   │     → macro_score 0.0–1.0                                                   │
   │                                                                              │
   │  2. Técnico (20%)                                                            │
-  │     yfinance 1D/4H/1H: RSI, MACD, BB, SMA200                                │
+  │     Yahoo Finance + Twelve Data 1D/4H/1H: RSI, MACD, BB, SMA200             │
+  │     Ambas fuentes simultáneas; Yahoo preferido, TD cubre si Yahoo falla      │
   │     → technical_score 0.0–1.0 | bullish_count 0–3                           │
   │                                                                              │
   │  3. Componentes (20%)                                                        │
   │     Top-10 holdings + 11 sectores SPDR                                       │
+  │     Yahoo batch primero; Twelve Data rellena símbolos no devueltos            │
   │     → components_score 0.0–1.0                                               │
   │                                                                              │
   │  4. Sentimiento (15%)                                                        │
@@ -147,11 +149,11 @@ INICIO DEL CICLO (cada 60 min via APScheduler)
 | # | Dimensión | Peso | Fuente principal |
 |---|-----------|------|-----------------|
 | 1 | **Macro** | 25% | FRED API (CPI, PCE, NFP, yield curve) |
-| 2 | **Técnico** | 20% | yfinance multi-TF (1D/4H/1H): RSI, MACD, BB, SMA200 |
-| 3 | **Componentes** | 20% | Top-10 holdings + 11 sectores SPDR |
+| 2 | **Técnico** | 20% | Yahoo Finance + Twelve Data multi-TF (1D/4H/1H): RSI, MACD, BB, SMA200 |
+| 3 | **Componentes** | 20% | Yahoo Finance + Twelve Data — Top-10 holdings + 11 sectores SPDR |
 | 4 | **Sentimiento** | 15% | VIX term structure + Put/Call + Fear&Greed + VADER |
 | 5 | **Eventos** | 10% | FOMC + calendario + Reuters RSS geopolítica |
-| 6 | **Cross-Assets** | 10% | DXY, TLT, HYG, QQQ, GLD, USO, BTC |
+| 6 | **Cross-Assets** | 10% | Yahoo Finance + Twelve Data — DXY, TLT, HYG, QQQ, GLD, USO, BTC |
 
 Para el detalle completo → ver [data_sources.md](data_sources.md).
 

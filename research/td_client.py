@@ -1,9 +1,10 @@
 """
-Twelve Data API client — fallback cuando Yahoo Finance está bloqueado.
+Twelve Data API client — fuente de precios complementaria a Yahoo Finance.
+Ambas fuentes corren siempre en simultáneo; Yahoo es preferido cuando ambas responden.
 Free tier: 800 calls/día, 8 credits/minuto.
 
 Reglas:
-- Solo se usa cuando yf_client está bloqueado (nunca como fuente primaria)
+- Corre siempre junto a Yahoo (no solo como fallback)
 - Circuit breaker propio: rate limit → bloqueo por 65s (ventana 1-min de TD)
 - Contador diario: si se agota el cupo, no llama más hasta el día siguiente
 - reset() solo limpia el circuit breaker, no el contador diario

@@ -21,11 +21,11 @@ Ambos bots corren en la misma PC y se comunican directamente por `127.0.0.1`.
 | # | Dimensión | Fuentes principales | Peso |
 |---|-----------|--------------------|----|
 | 1 | **Macro** | FRED API (CPI, PCE, NFP, Fed Funds Rate, yield curve) | 25% |
-| 2 | **Técnico** | yfinance multi-timeframe (1D / 4H / 1H): RSI, MACD, BB, SMA200 | 20% |
-| 3 | **Componentes** | Top-10 holdings SPY + 11 sectores SPDR | 20% |
+| 2 | **Técnico** | Yahoo Finance + Twelve Data, multi-timeframe (1D / 4H / 1H): RSI, MACD, BB, SMA200 | 20% |
+| 3 | **Componentes** | Yahoo Finance + Twelve Data — Top-10 holdings SPY + 11 sectores SPDR | 20% |
 | 4 | **Sentimiento** | VIX term structure + Put/Call CBOE + Fear&Greed + VADER | 15% |
 | 5 | **Eventos** | FOMC + calendario económico + geopolítica Reuters RSS | 10% |
-| 6 | **Cross-Assets** | DXY, TLT, HYG, QQQ, GLD, USO, BTC divergencias vs SPY | 10% |
+| 6 | **Cross-Assets** | Yahoo Finance + Twelve Data — DXY, TLT, HYG, QQQ, GLD, USO, BTC vs SPY | 10% |
 
 Para el detalle completo de cada fuente → ver [data_sources.md](data_sources.md).
 
@@ -86,6 +86,7 @@ Para el detalle completo → ver [strategy.md](strategy.md).
 
 ## Características Principales
 
+- **Doble fuente de precios**: Yahoo Finance + Twelve Data corren **simultáneamente** en todos los módulos. Yahoo es preferido; Twelve Data cubre huecos. Si ambas fallan → score neutral 0.5, Claude AI siempre decide.
 - **Especialización profunda en SPY**: 6 dimensiones de análisis vs. el sistema legado de 4 componentes con 8 ETFs.
 - **Pipeline de filtros en cascada**: Vetos duros → Score compuesto → Multiplicadores de eventos → Gate doble (score + dimensiones) → Validación Claude AI.
 - **Claude AI como motor de decisión**: El modelo recibe el snapshot completo de mercado y puede confirmar APPROVE, vetar la señal, o refinar el sizing.
@@ -114,22 +115,25 @@ Trading-agente-01/
 ├── start_agente01.bat        # Arranque rapido en Windows (doble click)
 │
 ├── research/                 # Capa de investigación (12+ fuentes)
-│   ├── market_data.py        # Precio, volumen, SMA via yfinance (legacy)
+│   ├── yf_client.py          # Yahoo Finance — circuit breaker + safe wrappers
+│   ├── td_client.py          # Twelve Data — circuit breaker + cuota diaria
+│   ├── market_data.py        # Quote SPY: precio, volumen, SMA (Yahoo + TD simultáneos)
 │   ├── macro_indicators.py   # Fear & Greed + VIX (legacy + SPY specialist)
 │   ├── news_fetcher.py       # Titulares via NewsAPI
 │   ├── macro/                # Dimensión 1 — FRED API
 │   │   └── fred_client.py    # CPI, PCE, NFP, yield curve
 │   ├── technical/            # Dimensión 2 — Multi-timeframe
-│   │   └── multi_tf.py       # RSI, MACD, BB, SMA200 en 1D/4H/1H
+│   │   └── multi_timeframe.py  # RSI, MACD, BB, SMA200 en 1D/4H/1H (Yahoo + TD simultáneos)
 │   ├── components/           # Dimensión 3 — Holdings y sectores
-│   │   └── spy_holdings.py   # Top-10 + 11 sectores SPDR
+│   │   ├── top_holdings.py   # Top-10 holdings SPY (Yahoo + TD simultáneos)
+│   │   └── sectors.py        # 11 sectores SPDR (Yahoo + TD simultáneos)
 │   ├── sentiment/            # Dimensión 4 — Sentimiento avanzado
 │   │   ├── vix_term_structure.py  # Contango/backwardation VIX
 │   │   └── put_call.py            # Put/Call ratio CBOE
 │   ├── events/               # Dimensión 5 — Calendario
 │   │   └── event_calendar.py # FOMC + economic calendar + geopolítica
-│   └── cross_asset/          # Dimensión 6 — Cross-assets
-│       └── cross_asset.py    # DXY, TLT, HYG, QQQ, GLD, USO, BTC
+│   └── cross_assets/         # Dimensión 6 — Cross-assets
+│       └── correlations.py   # DXY, TLT, HYG, QQQ, GLD, USO, BTC (Yahoo + TD simultáneos)
 │
 ├── analysis/                 # Capa de análisis
 │   ├── sentiment_analyzer.py # VADER NLP sobre titulares

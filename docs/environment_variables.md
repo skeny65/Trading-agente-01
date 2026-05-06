@@ -25,6 +25,19 @@ Usa `.env.example` como plantilla.
 
 ## Variables Recomendadas (con fallbacks funcionales si faltan)
 
+### TWELVE_DATA_API_KEY
+- **Descripción**: Clave para Twelve Data — fuente de precios OHLCV complementaria a Yahoo Finance
+- **Dónde obtenerla**: https://twelvedata.com → Sign Up → Free Plan
+- **Ejemplo**: `TWELVE_DATA_API_KEY=132896822e8d48dfac66cae7c0858711`
+- **Efecto si falta**: Los módulos de precios solo usan Yahoo Finance. Twelve Data queda desactivado.
+- **Nota**: El free tier incluye 800 llamadas/día. El agente tiene un contador interno que se resetea cada día calendario.
+
+### TWELVE_DATA_DAILY_LIMIT
+- **Descripción**: Límite diario de llamadas a Twelve Data (buffer de seguridad bajo el límite real de 800)
+- **Default**: `790`
+- **Cuándo cambiar**: Si upgrade a plan pago, aumentar según el plan
+- **Ejemplo**: `TWELVE_DATA_DAILY_LIMIT=790`
+
 ### FRED_API_KEY
 - **Descripción**: Clave para la API de datos macro de la Federal Reserve (FRED)
 - **Dónde obtenerla**: https://fred.stlouisfed.org/docs/api/api_key.html (gratuita)
@@ -206,6 +219,10 @@ Usa `.env.example` como plantilla.
 ```bash
 # ── Claude AI (requerido para el motor de decisión) ───────────
 ANTHROPIC_API_KEY=sk-ant-api03-tu_clave_aqui
+
+# ── Twelve Data (fuente de precios complementaria — free tier) ─
+TWELVE_DATA_API_KEY=tu_api_key_de_twelvedata
+TWELVE_DATA_DAILY_LIMIT=790
 
 # ── FRED API (recomendado — dimensión Macro) ──────────────────
 FRED_API_KEY=tu_clave_fred

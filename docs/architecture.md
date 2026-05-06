@@ -258,8 +258,9 @@ logs/
 
 | Fuente | Módulo | API Key | Coste | Fallback |
 |--------|--------|---------|-------|---------|
-| Yahoo Finance (precios, 60d) | market_data.py | No | Gratis | `None` → símbolo saltado |
-| Yahoo Finance (^VIX, multi-TF) | macro_indicators / technical | No | Gratis | VIX = 20.0 |
+| Yahoo Finance (precios, 60d) | market_data.py, multi_timeframe, sectors, top_holdings, correlations | No | Gratis | Circuit breaker 55 min; Twelve Data cubre en simultáneo |
+| Twelve Data (precios, REST) | research/td_client.py | Si (`TWELVE_DATA_API_KEY`) | Gratis (800 calls/día) | Circuit breaker; Yahoo cubre en simultáneo |
+| Yahoo Finance (^VIX) | macro_indicators / vix_term_structure | No | Gratis | VIX = 20.0 |
 | CNN Fear & Greed | macro_indicators.py | No | Gratis | score = 50.0 |
 | FRED API (CPI, PCE, NFP, tasas) | research/macro/*.py | Si | Gratis | score = 0.5 |
 | NewsAPI (4h window) | news_fetcher.py | Si | Gratis (100/día) | Lista vacía → neutral |

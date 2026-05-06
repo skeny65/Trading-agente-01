@@ -27,7 +27,7 @@ APScheduler dispara run_cycle() — 09:45 ET [PRIORITY]
     │   │     → macro_score = 0.62
     │   │
     │   ├─ DIMENSIÓN 2 — Técnico (20%)
-    │   │   multi_tf.analyze("SPY")
+    │   │   multi_timeframe.analyze("SPY") — Yahoo + Twelve Data simultáneos
     │   │     1D: RSI=58, precio > SMA200 → bullish ✓
     │   │     4H: MACD histograma positivo → bullish ✓
     │   │     1H: precio en banda media BB → neutral
@@ -35,7 +35,7 @@ APScheduler dispara run_cycle() — 09:45 ET [PRIORITY]
     │   │     → technical_score = 0.81
     │   │
     │   ├─ DIMENSIÓN 3 — Componentes (20%)
-    │   │   spy_holdings.analyze()
+    │   │   top_holdings + sectors — Yahoo batch + Twelve Data rellena huecos
     │   │     Top-10: AAPL+1.2%, MSFT+0.8%, NVDA+2.1%, AMZN+0.5% → 8/10 positivos
     │   │     Sectores: XLK+1.5%, XLF+0.7%, XLV+0.3%, XLI+0.8% → 9/11 positivos
     │   │     sector_breadth = 0.82 → positivo
@@ -55,6 +55,7 @@ APScheduler dispara run_cycle() — 09:45 ET [PRIORITY]
     │   │   → events_score = 0.80, score_multiplier = 1.0, veto = False
     │   │
     │   ├─ DIMENSIÓN 6 — Cross-Assets (10%)
+    │   │   correlations.py — Yahoo + Twelve Data simultáneos
     │   │   DXY: -0.3% (dólar debilitándose = favorable SPY)
     │   │   TLT: +0.5% (yields bajando = favorable equities)
     │   │   HYG: +0.4% (apetito riesgo = positivo)

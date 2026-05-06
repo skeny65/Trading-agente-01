@@ -19,7 +19,7 @@ NEWSAPI_KEY: str = os.getenv("NEWSAPI_KEY", "")
 # ── FRED API (datos macroeconómicos oficiales US) ─────────────────────────────
 FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
 
-# ── Twelve Data (fallback de mercado cuando Yahoo Finance está bloqueado) ──────
+# ── Twelve Data (fuente de precios complementaria — corre simultáneo con Yahoo) ─
 TWELVE_DATA_API_KEY: str  = os.getenv("TWELVE_DATA_API_KEY", "")
 TWELVE_DATA_DAILY_LIMIT: int = int(os.getenv("TWELVE_DATA_DAILY_LIMIT", "790"))  # buffer bajo 800
 

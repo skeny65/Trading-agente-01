@@ -144,26 +144,28 @@ def _neutral_result() -> MultiTimeframeAnalysis:
 def get_multi_timeframe_analysis(symbol: str = None) -> MultiTimeframeAnalysis:
     """
     Descarga datos en 3 timeframes y analiza la alineación técnica.
-    Retorna score neutral 0.5 si Yahoo Finance no está disponible.
+    Yahoo Finance y Twelve Data corren simultáneamente; Yahoo preferido.
+    Retorna score neutral 0.5 si ambas fuentes fallan.
     """
     sym = symbol or config.SYMBOL
 
-    df_daily  = yf_client.safe_history(sym, period="1y",  interval="1d")
-    if df_daily is None:
-        df_daily = td_client.safe_time_series(sym, interval="1day", outputsize=252)
+    # Ambas fuentes corren simultáneamente; Yahoo preferido, TD cubre lo que falta
+    yf_daily = yf_client.safe_history(sym, period="1y",  interval="1d")
+    td_daily = td_client.safe_time_series(sym, interval="1day", outputsize=252)
+    df_daily = yf_daily if yf_daily is not None else td_daily
 
-    df_1h_raw = yf_client.safe_history(sym, period="60d", interval="1h")
-    df_1h     = yf_client.safe_history(sym, period="30d", interval="1h")
-    if df_1h is None:
-        df_1h = td_client.safe_time_series(sym, interval="1h", outputsize=720)
+    # Una sola llamada Yahoo 1H con 60d — sirve tanto para 4H (resample) como para 1H análisis
+    yf_1h = yf_client.safe_history(sym, period="60d", interval="1h")
+    td_1h = td_client.safe_time_series(sym, interval="1h", outputsize=720)
+    df_1h = yf_1h if yf_1h is not None else td_1h
 
     if df_daily is None or df_1h is None:
         logger.warning(f"Tecnico [{sym}]: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
         return _neutral_result()
 
     try:
-        if df_1h_raw is not None:
-            df_4h = df_1h_raw.resample("4h").agg({
+        if yf_1h is not None:
+            df_4h = yf_1h.resample("4h").agg({
                 "Open": "first", "High": "max", "Low": "min",
                 "Close": "last", "Volume": "sum",
             }).dropna()

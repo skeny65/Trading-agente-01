@@ -91,12 +91,12 @@ macro_score: combinación ponderada de:
 
 ---
 
-## Dimensión 2 — Técnico (20%): yfinance Multi-Timeframe
+## Dimensión 2 — Técnico (20%): Yahoo Finance + Twelve Data Multi-Timeframe
 
-**Módulo:** `research/technical/multi_tf.py`
-**Librería:** `yfinance` + `ta` (Technical Analysis library)
-**API Key:** No requerida
-**Coste:** Gratuito
+**Módulo:** `research/technical/multi_timeframe.py`
+**Librerías:** `yfinance` + `twelvedata` (REST API) + `ta` (Technical Analysis library)
+**API Key:** No requerida (Yahoo); `TWELVE_DATA_API_KEY` (Twelve Data)
+**Coste:** Gratuito ambas (Twelve Data free tier: 800 calls/día)
 
 ### Timeframes analizados
 
@@ -136,10 +136,10 @@ Precio < SMA200  → NO_SIGNAL inmediato (régimen bajista)
 
 ## Dimensión 3 — Componentes (20%): Holdings y Sectores SPY
 
-**Módulo:** `research/components/spy_holdings.py`
-**Librería:** `yahooquery`
-**API Key:** No requerida
-**Coste:** Gratuito
+**Módulos:** `research/components/top_holdings.py`, `research/components/sectors.py`
+**Librerías:** `yfinance` (Yahoo Finance) + Twelve Data REST API
+**API Key:** No requerida (Yahoo); `TWELVE_DATA_API_KEY` (Twelve Data)
+**Coste:** Gratuito ambas
 
 ### Top-10 holdings SPY monitoreados
 
@@ -258,8 +258,8 @@ Si hay evento HIGH < 24h: trail_percent × 0.70 (más ajustado = más defensivo)
 
 ## Dimensión 6 — Cross-Assets (10%): Divergencias vs SPY
 
-**Módulo:** `research/cross_asset/cross_asset.py`
-**Fuente:** yfinance
+**Módulo:** `research/cross_assets/correlations.py`
+**Fuentes:** Yahoo Finance + Twelve Data (simultáneas)
 
 ### Activos monitoreados
 
@@ -312,13 +312,37 @@ Claude NO puede promover NO_SIGNAL a APPROVE (los filtros son autoritativos en r
 
 ---
 
+## Fuentes de Precios: Yahoo Finance + Twelve Data (simultáneas)
+
+Desde la versión actual, **Yahoo Finance y Twelve Data se consultan siempre al mismo tiempo** en todos los módulos de precios. No hay fallback secuencial: ambas fuentes trabajan en paralelo.
+
+### Política de combinación por módulo
+
+| Módulo | Comportamiento |
+|---|---|
+| `market_data.py` (quote SPY) | Yahoo preferido. Si ambas disponibles: usa Yahoo para todo; si Yahoo trae Volume=0, lo rellena con Twelve Data. |
+| `technical/multi_timeframe.py` | Yahoo preferido por timeframe (1D, 1H). TD cubre si Yahoo falla. 4H: resamplea Yahoo 1H; si no hay, pide nativo 4H a TD. |
+| `components/sectors.py` | Yahoo batch descarga todos los sectores. TD añade cualquier sector que Yahoo no devolvió. |
+| `components/top_holdings.py` | Mismo patrón que sectores — Yahoo batch primero, TD rellena huecos. |
+| `cross_assets/correlations.py` | Mismo patrón — activos cross (DXY, TLT, HYG, etc.). |
+
+### Circuit breakers independientes
+
+Cada fuente tiene su propio circuit breaker:
+- **Yahoo Finance**: Al primer error 429 o rate-limit, se bloquea ~55 minutos. Módulos que lo usan reciben `None` al instante.
+- **Twelve Data**: Al primer error de quota o HTTP 429, se bloquea el ciclo. El contador diario (800 llamadas) persiste entre ciclos — no se resetea al inicio de cada uno.
+- Si **ambas** fallan → score neutral 0.5 para la dimensión afectada. Claude AI siempre recibe un resultado.
+
+---
+
 ## Resiliencia y Fallbacks
 
 | Fuente | Fallo posible | Fallback |
 |---|---|---|
 | FRED API | Sin key, timeout | Macro score = 0.5 (neutral) |
-| yfinance multi-TF | Rate limit | Score técnico = 0.5, bullish_count = 1 |
-| yahooquery holdings | Timeout | Components score = 0.5 |
+| Yahoo Finance (precios) | Rate limit 429 | Circuit breaker 55 min; Twelve Data cubre en simultáneo |
+| Twelve Data (precios) | Cuota 800/día agotada | Circuit breaker; Yahoo cubre en simultáneo |
+| Yahoo + Twelve Data (ambas) | Ambas bloqueadas | Score neutral 0.5 por dimensión afectada |
 | VIX term structure | Futuros no disponibles | Estructura = "flat" (score 0.55) |
 | Put/Call CBOE | Endpoint caído | Put/Call = 0.85 (neutral) |
 | CNN Fear & Greed | Error 418 anti-bot | Score = 50.0 (Neutral → 0.50) |
@@ -326,7 +350,6 @@ Claude NO puede promover NO_SIGNAL a APPROVE (los filtros son autoritativos en r
 | VADER | — (corre local) | — |
 | FOMC calendar | Parsing error | Sin eventos detectados |
 | Reuters RSS | Timeout | Sin eventos geopolíticos |
-| Cross-asset | yfinance rate limit | Score = 0.5 por activo fallido |
 | Claude AI | API error, timeout | APPROVE pasa sin veto (filtros ya lo validaron) |
 
 Ningún fallo individual detiene el ciclo. El agente siempre produce una decisión.
