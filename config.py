@@ -19,6 +19,10 @@ NEWSAPI_KEY: str = os.getenv("NEWSAPI_KEY", "")
 # ── FRED API (datos macroeconómicos oficiales US) ─────────────────────────────
 FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
 
+# ── Twelve Data (fallback de mercado cuando Yahoo Finance está bloqueado) ──────
+TWELVE_DATA_API_KEY: str  = os.getenv("TWELVE_DATA_API_KEY", "")
+TWELVE_DATA_DAILY_LIMIT: int = int(os.getenv("TWELVE_DATA_DAILY_LIMIT", "790"))  # buffer bajo 800
+
 # ── Anthropic API (Claude — motor de análisis) ────────────────────────────────
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL: str      = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")

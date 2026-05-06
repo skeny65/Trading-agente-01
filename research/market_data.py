@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import config
-from research import yf_client
+from research import yf_client, td_client
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ class Quote:
 
 def get_quote(symbol: str) -> "Quote | None":
     hist = yf_client.safe_history(symbol, period=f"{config.PRICE_HISTORY_DAYS}d")
+    if hist is None:
+        hist = td_client.safe_time_series(symbol, interval="1day", outputsize=config.PRICE_HISTORY_DAYS)
     if hist is None or len(hist) < 21:
         return None
 

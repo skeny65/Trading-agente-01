@@ -5,7 +5,7 @@ Detecta divergencias que pueden anticipar movimientos en el S&P 500.
 import logging
 from dataclasses import dataclass
 
-from research import yf_client
+from research import yf_client, td_client
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +56,31 @@ def get_cross_asset_data(spy_change_5d: float | None = None) -> CrossAssetData:
 
     raw = yf_client.safe_download(symbols, period="15d", interval="1d",
                                    progress=False, auto_adjust=True)
+
+    # Fallback a Twelve Data si Yahoo está bloqueado
     if raw is None:
-        logger.warning("Cross-assets: sin datos — score neutral 0.5")
-        return CrossAssetData(
-            assets={}, dxy_bullish=None, tlt_bullish=None,
-            hyg_bullish=None, qqq_leading=None,
-            divergences=[], score=0.5,
-        )
+        if not td_client.is_blocked() and td_client.remaining_calls() >= len(symbols):
+            logger.info("Cross-assets: fallback a Twelve Data")
+            td_results = td_client.safe_batch_close(symbols, interval="1day", outputsize=15)
+            frames = {s: df["Close"] for s, df in td_results.items() if df is not None and "Close" in df}
+            if frames:
+                raw = pd.DataFrame(frames)
+                raw.columns = pd.MultiIndex.from_product([["Close"], raw.columns])
+            else:
+                logger.warning("Cross-assets: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
+                return CrossAssetData(
+                    assets={}, dxy_bullish=None, tlt_bullish=None,
+                    hyg_bullish=None, qqq_leading=None,
+                    divergences=[], score=0.5,
+                )
+        else:
+            logger.warning("Cross-assets: sin datos — score neutral 0.5")
+            return CrossAssetData(
+                assets={}, dxy_bullish=None, tlt_bullish=None,
+                hyg_bullish=None, qqq_leading=None,
+                divergences=[], score=0.5,
+            )
+
     try:
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:

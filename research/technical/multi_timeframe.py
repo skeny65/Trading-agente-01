@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 import config
-from research import yf_client
+from research import yf_client, td_client
 from research.technical.indicators import get_indicators_snapshot
 from research.technical.key_levels import KeyLevels, get_key_levels
 
@@ -149,18 +149,27 @@ def get_multi_timeframe_analysis(symbol: str = None) -> MultiTimeframeAnalysis:
     sym = symbol or config.SYMBOL
 
     df_daily  = yf_client.safe_history(sym, period="1y",  interval="1d")
+    if df_daily is None:
+        df_daily = td_client.safe_time_series(sym, interval="1day", outputsize=252)
+
     df_1h_raw = yf_client.safe_history(sym, period="60d", interval="1h")
     df_1h     = yf_client.safe_history(sym, period="30d", interval="1h")
+    if df_1h is None:
+        df_1h = td_client.safe_time_series(sym, interval="1h", outputsize=720)
 
     if df_daily is None or df_1h is None:
-        logger.warning(f"Tecnico [{sym}]: sin datos — score neutral 0.5")
+        logger.warning(f"Tecnico [{sym}]: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
         return _neutral_result()
 
     try:
-        df_4h = df_1h_raw.resample("4h").agg({
-            "Open": "first", "High": "max", "Low": "min",
-            "Close": "last", "Volume": "sum",
-        }).dropna() if df_1h_raw is not None else pd.DataFrame()
+        if df_1h_raw is not None:
+            df_4h = df_1h_raw.resample("4h").agg({
+                "Open": "first", "High": "max", "Low": "min",
+                "Close": "last", "Volume": "sum",
+            }).dropna()
+        else:
+            # Twelve Data soporta 4h nativo — mejor que resamplear desde 1h de TD
+            df_4h = td_client.safe_time_series(sym, interval="4h", outputsize=90) or pd.DataFrame()
     except Exception:
         df_4h = pd.DataFrame()
 

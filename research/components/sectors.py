@@ -5,7 +5,7 @@ Cuántos sectores están en verde y cuál lidera/rezaga.
 import logging
 from dataclasses import dataclass
 
-from research import yf_client
+from research import yf_client, td_client
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +50,31 @@ def get_sector_breadth() -> SectorBreadthData:
 
     raw = yf_client.safe_download(symbols, period="10d", interval="1d",
                                    progress=False, auto_adjust=True)
+
+    # Fallback a Twelve Data si Yahoo está bloqueado
     if raw is None:
-        logger.warning("Sectores: sin datos — score neutral 0.5")
-        return SectorBreadthData(
-            sectors=[], green_count=0, total_count=0,
-            breadth_ratio=0.5, leading_sector=None,
-            lagging_sector=None, tech_leading=False, score=0.5,
-        )
+        if not td_client.is_blocked() and td_client.remaining_calls() >= len(symbols):
+            logger.info("Sectores: fallback a Twelve Data")
+            td_results = td_client.safe_batch_close(symbols, interval="1day", outputsize=10)
+            frames = {s: df["Close"] for s, df in td_results.items() if df is not None and "Close" in df}
+            if frames:
+                raw = pd.DataFrame(frames)
+                raw.columns = pd.MultiIndex.from_product([["Close"], raw.columns])
+            else:
+                logger.warning("Sectores: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
+                return SectorBreadthData(
+                    sectors=[], green_count=0, total_count=0,
+                    breadth_ratio=0.5, leading_sector=None,
+                    lagging_sector=None, tech_leading=False, score=0.5,
+                )
+        else:
+            logger.warning("Sectores: sin datos — score neutral 0.5")
+            return SectorBreadthData(
+                sectors=[], green_count=0, total_count=0,
+                breadth_ratio=0.5, leading_sector=None,
+                lagging_sector=None, tech_leading=False, score=0.5,
+            )
+
     try:
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:

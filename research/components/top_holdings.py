@@ -5,7 +5,7 @@ Fuente: yfinance. Pesos estáticos (actualizar si cambian significativamente).
 import logging
 from dataclasses import dataclass
 
-from research import yf_client
+from research import yf_client, td_client
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,24 @@ def get_top_holdings_data() -> TopHoldingsData:
 
     raw = yf_client.safe_download(symbols, period="30d", interval="1d",
                                    progress=False, auto_adjust=True)
+
+    # Fallback a Twelve Data si Yahoo está bloqueado
     if raw is None:
-        logger.warning("Top holdings: sin datos — score neutral 0.5")
-        return TopHoldingsData(holdings=[], weighted_avg_1d=None, bullish_count=0, score=0.5)
+        if not td_client.is_blocked() and td_client.remaining_calls() >= len(symbols):
+            logger.info("Top holdings: fallback a Twelve Data")
+            td_results = td_client.safe_batch_close(symbols, interval="1day", outputsize=30)
+            # Construir pseudo-DataFrame con columna Close multi-nivel
+            frames = {s: df["Close"] for s, df in td_results.items() if df is not None and "Close" in df}
+            if frames:
+                raw = pd.DataFrame(frames)
+                raw.columns = pd.MultiIndex.from_product([["Close"], raw.columns])
+            else:
+                logger.warning("Top holdings: sin datos en Yahoo ni Twelve Data — score neutral 0.5")
+                return TopHoldingsData(holdings=[], weighted_avg_1d=None, bullish_count=0, score=0.5)
+        else:
+            logger.warning("Top holdings: sin datos — score neutral 0.5")
+            return TopHoldingsData(holdings=[], weighted_avg_1d=None, bullish_count=0, score=0.5)
+
     try:
         close = raw["Close"] if "Close" in raw else raw
     except Exception as exc:
